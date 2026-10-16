@@ -1,0 +1,28 @@
+{
+  "name": "tcg-lens",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test -w @tcglens/resolution && npm run test:ingestion && npm run test:market && npm run test:sealed",
+    "typecheck": "npm run typecheck -w @tcglens/contracts && npm run typecheck -w @tcglens/resolution && npm run typecheck -w @tcglens/api && npm run typecheck:ingestion",
+    "dev:api": "npm run dev -w @tcglens/api",
+    "import:tcgdex": "npm run tcgdex -w @tcglens/ingestion-worker --",
+    "test:ingestion": "rm -rf .tmp-ingestion-test && tsc -p tsconfig.ingestion-test.json && node --test .tmp-ingestion-test/packages/ingestion/test/tcgdex-bootstrap.test.js",
+    "import:tcgdex:summary": "npm run tcgdex:summary -w @tcglens/ingestion-worker",
+    "typecheck:ingestion": "tsc -p apps/ingestion/tsconfig.json",
+    "import:cardmarket": "npm run cardmarket -w @tcglens/ingestion-worker --",
+    "import:tcgcsv": "npm run tcgcsv -w @tcglens/ingestion-worker --",
+    "test:market": "rm -rf .tmp-market-test && tsc -p tsconfig.market-test.json && node --test .tmp-market-test/packages/ingestion/test/market-connectors.test.js",
+    "test:market:integration": "npm run test:market-integration -w @tcglens/ingestion-worker",
+    "import:barcodes": "npm run barcode -w @tcglens/ingestion-worker --",
+    "test:sealed": "rm -rf .tmp-sealed-test && tsc -p tsconfig.sealed-test.json && node --test .tmp-sealed-test/packages/ingestion/test/sealed-barcode.test.js",
+    "test:sealed:integration": "npm run test:sealed-integration -w @tcglens/ingestion-worker",
+    "preview:web": "node apps/web-preview/server.mjs",
+    "validate:local": "bash scripts/validate-local.sh"
+  },
+  "type": "module"
+}

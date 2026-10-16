@@ -1,0 +1,23 @@
+{
+  "name": "@tcglens/ingestion-worker",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tcgdex": "tsx src/tcgdex-import.ts",
+    "tcgdex:summary": "tsx src/tcgdex-bootstrap-summary.ts",
+    "test:integration": "tsx test/tcgdex-postgres.integration.ts",
+    "cardmarket": "tsx src/cardmarket-import.ts",
+    "tcgcsv": "tsx src/tcgcsv-import.ts",
+    "test:market-integration": "tsx test/market-enrichment-postgres.integration.ts",
+    "barcode": "tsx src/barcode-import.ts",
+    "test:sealed-integration": "tsx test/sealed-barcode-postgres.integration.ts"
+  },
+  "dependencies": {
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "@types/pg": "^8.15.0"
+  }
+}

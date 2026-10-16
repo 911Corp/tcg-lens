@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": ".tmp-sealed-test",
+    "rootDir": "."
+  },
+  "include": [
+    "packages/ingestion/src/**/*.ts",
+    "packages/ingestion/test/sealed-barcode.test.ts",
+    "packages/ingestion/test/node-test-shim.d.ts"
+  ]
+}

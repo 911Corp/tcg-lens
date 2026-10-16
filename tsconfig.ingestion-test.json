@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": ".tmp-ingestion-test",
+    "rootDir": "."
+  },
+  "include": [
+    "packages/ingestion/src/**/*.ts",
+    "packages/ingestion/test/**/*.ts"
+  ]
+}

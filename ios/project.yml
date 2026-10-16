@@ -1,0 +1,20 @@
+name: TCGLens
+options:
+  bundleIdPrefix: com.tcglens
+  deploymentTarget:
+    iOS: "18.0"
+targets:
+  TCGLens:
+    type: application
+    platform: iOS
+    sources:
+      - path: TCGLens/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tcglens.app
+        INFOPLIST_KEY_NSCameraUsageDescription: "TCG Lens utilise la caméra pour reconnaître les cartes et produits TCG en temps réel."
+        GENERATE_INFOPLIST_FILE: YES
+    info:
+      path: TCGLens/Info.plist
+      properties:
+        UILaunchScreen: {}

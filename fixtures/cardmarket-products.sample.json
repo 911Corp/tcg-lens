@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "createdAt": "2026-10-16T00:00:00Z",
+  "products": [
+    {
+      "idProduct": 12345,
+      "name": "Charizard ex (MEW 199)",
+      "idCategory": 51,
+      "categoryName": "Pokemon Single",
+      "idExpansion": 15101,
+      "expansionName": "151",
+      "idMetacard": 888,
+      "number": "199/165",
+      "rarity": "Special Illustration Rare"
+    }
+  ]
+}

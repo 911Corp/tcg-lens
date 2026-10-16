@@ -1,0 +1,28 @@
+{
+  "group": { "groupId": 3170, "name": "151", "abbreviation": "MEW", "categoryId": 3 },
+  "products": [
+    {
+      "productId": 451396,
+      "name": "Charizard ex",
+      "cleanName": "Charizard ex",
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/451396_200w.jpg",
+      "categoryId": 3,
+      "groupId": 3170,
+      "extendedData": [
+        { "name": "Number", "value": "199/165" },
+        { "name": "Rarity", "value": "Special Illustration Rare" }
+      ]
+    }
+  ],
+  "prices": [
+    {
+      "productId": 451396,
+      "lowPrice": 170,
+      "midPrice": 185,
+      "highPrice": 230,
+      "marketPrice": 181,
+      "directLowPrice": 178,
+      "subTypeName": "Holofoil"
+    }
+  ]
+}

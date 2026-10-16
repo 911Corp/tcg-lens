@@ -1,0 +1,11 @@
+{
+  "name": "@tcglens/resolution",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {"@tcglens/contracts": "0.1.0"},
+  "devDependencies": {"tsx": "^4.20.0","typescript":"^5.9.0"}
+}

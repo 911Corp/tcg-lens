@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.TCGLens" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#031218</item>
+        <item name="android:navigationBarColor">#031218</item>
+    </style>
+</resources>

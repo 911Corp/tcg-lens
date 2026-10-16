@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "apps/ingestion/src/**/*.ts",
+    "apps/ingestion/test/market-enrichment-postgres.integration.ts",
+    "packages/ingestion/src/**/*.ts",
+    "packages/ingestion/test/node-test-shim.d.ts"
+  ]
+}

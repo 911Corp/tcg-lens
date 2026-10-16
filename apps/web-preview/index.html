@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+<meta name="theme-color" content="#07101a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" href="/icon.svg" />
+<title>TCG Lens</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="desktop"><main class="phone" id="phone">
+<div class="status"><span id="clock">9:41</span><span>●●● Wi‑Fi ▰</span></div>
+
+<section class="screen on" id="home">
+  <div class="hero-home">
+    <div class="brand"><div class="brandmark"></div><b>TCG Lens</b></div>
+    <h1>Scan. Know.<br>Collect.</h1>
+    <p>Reconnais des cartes et produits scellés, consulte leur marché réel et garde ta collection sous la main.</p>
+  </div>
+  <div class="home-visual"><div class="mock-card"></div><div class="mock-overlay"><span><b>Card detected</b><small>Set · Number · Language</small></span><span><b>Market</b><small class="heat">Heat Beta</small></span></div></div>
+  <div class="stack"><button class="primary full" id="startBtn">Ouvrir Lens</button><button class="secondary full" data-go="search">Rechercher dans le catalogue</button><button class="ghost full" id="installBtn" style="display:none">Installer l’app</button></div>
+  <p class="install-hint" id="iosInstall"></p>
+</section>
+
+<section class="screen camera no-pad" id="lens">
+  <video id="camera" autoplay playsinline muted></video>
+  <div class="demo-scene"><div class="demo-object card"></div><div class="demo-object box"></div></div><div class="shade"></div>
+  <div class="camera-top"><button class="round" data-go="home">×</button><div class="livepill" id="livePill">LENS READY</div><button class="round" data-go="legend">ⓘ</button></div>
+  <div class="reticle"></div>
+  <div class="scan-status" id="scanStatus"><b id="scanTitle">Analyse locale…</b><span class="tiny muted" id="scanText">Préparation de l’image</span><div class="progress"><i id="scanProgress"></i></div></div>
+  <div class="scan-actions"><button id="barcodeBtn">▥ Barcode</button><button class="scan-main" id="ocrBtn">⌖ Identifier</button><button data-go="search">⌕ Recherche</button></div>
+  <nav class="nav"><button class="active" data-go="lens">⌖<small>Lens</small></button><button data-go="search">⌕<small>Recherche</small></button><button data-go="collection">◇<small>Collection</small></button><button data-go="settings">⚙<small>Réglages</small></button></nav>
+</section>
+
+<section class="screen" id="search">
+  <div class="topbar"><div><div class="eyebrow">Catalogue réel</div><h2 style="margin:3px 0">Recherche</h2></div><button class="round" data-go="lens">⌖</button></div>
+  <div class="searchbox"><div class="searchrow"><input id="searchInput" placeholder="Nom ou numéro de carte…" autocomplete="off"><select id="langSelect"><option value="fr">FR</option><option value="en">EN</option><option value="ja">JP</option></select></div><div class="seg"><button class="on" data-kind="cards">Cartes</button><button data-kind="sealed">Scellés</button></div></div>
+  <div id="searchMeta" class="tiny muted" style="margin:4px 2px 12px">TCGdex pour les cartes · Cardmarket pour le scellé</div>
+  <div id="results" class="results"><div class="collection-empty">Commence à saisir un nom, un numéro ou un produit.</div></div>
+  <nav class="nav"><button data-go="lens">⌖<small>Lens</small></button><button class="active" data-go="search">⌕<small>Recherche</small></button><button data-go="collection">◇<small>Collection</small></button><button data-go="settings">⚙<small>Réglages</small></button></nav>
+</section>
+
+<section class="screen" id="detail"><button class="round detail-back" id="detailBack">‹</button><div class="detail-hero" id="detailHero"><div class="spinner"></div></div><div class="detail-content" id="detailContent"></div></section>
+
+<section class="screen" id="collection">
+  <div class="topbar"><div><div class="eyebrow">Local-first</div><h2 style="margin:3px 0">Ma collection</h2></div><button class="round" id="clearCollection">⌫</button></div>
+  <div id="collectionBody"></div>
+  <nav class="nav"><button data-go="lens">⌖<small>Lens</small></button><button data-go="search">⌕<small>Recherche</small></button><button class="active" data-go="collection">◇<small>Collection</small></button><button data-go="settings">⚙<small>Réglages</small></button></nav>
+</section>
+
+<section class="screen" id="settings">
+  <div class="topbar"><div><div class="eyebrow">Prototype mobile</div><h2 style="margin:3px 0">Réglages</h2></div><button class="round" data-go="lens">⌖</button></div>
+  <div class="settings-list">
+    <div class="setting"><label>Langue de scan par défaut</label><select id="settingsLang"><option value="fr">Français</option><option value="en">English</option><option value="ja">日本語</option></select></div>
+    <div class="setting"><label>Caméra</label><button class="secondary full" id="restartCamera">Réactiver la caméra arrière</button></div>
+    <div class="setting"><label>Mode de reconnaissance web</label><div class="notice">OCR local Beta : une image de la caméra est analysée sur l’appareil avec Tesseract.js, puis comparée au catalogue TCGdex. La future app native remplacera ce fallback par notre index visuel temps réel.</div></div>
+    <div class="setting"><label>Barcode Registry local</label><div id="barcodeCount" class="muted">0 association</div><button class="ghost full" id="clearBarcodes">Effacer les associations locales</button></div>
+    <div class="setting"><label>PWA</label><button class="primary full" id="settingsInstall">Installer sur l’écran d’accueil</button><p class="tiny muted">Sur iPhone : Partager → Sur l’écran d’accueil.</p></div>
+    <div class="setting"><label>Données</label><p class="tiny muted">Cartes : TCGdex. Marché cartes : Cardmarket/TCGplayer via TCGdex. Produits scellés : exports publics Cardmarket. Les images caméra ne sont pas envoyées par défaut.</p></div>
+  </div>
+  <nav class="nav"><button data-go="lens">⌖<small>Lens</small></button><button data-go="search">⌕<small>Recherche</small></button><button data-go="collection">◇<small>Collection</small></button><button class="active" data-go="settings">⚙<small>Réglages</small></button></nav>
+</section>
+
+<section class="screen" id="legend">
+  <div class="topbar"><div><div class="eyebrow">Comprendre Lens</div><h2 style="margin:3px 0">Légende</h2></div><button class="round" data-go="lens">×</button></div>
+  <div class="cardpanel">
+    <div class="legend-row"><b>≈ 185 €</b><div><b>Market</b><p>Estimation centrale issue des données de marché disponibles.</p></div></div>
+    <div class="legend-row"><b class="heat">🔥 HOT</b><div><b>Heat Beta</b><p>Indicateur provisoire basé sur la dynamique de prix et la couverture des sources. Il n’invente jamais un volume de ventes.</p></div></div>
+    <div class="legend-row"><b>↗</b><div><b>Heating</b><p>Les moyennes récentes accélèrent par rapport aux fenêtres plus longues.</p></div></div>
+    <div class="legend-row"><b class="good">HIGH</b><div><b>Confidence</b><p>Plusieurs sources/mesures compatibles et suffisamment fraîches.</p></div></div>
+  </div>
+  <div class="notice" style="margin-top:12px">Le Heat final intégrera les ventes confirmées, le sell-through et l’offre active dès que ces flux seront disponibles de façon fiable.</div>
+</section>
+
+<div class="modal" id="modal"><div class="modal-card"><div class="topbar"><div><div class="eyebrow" id="modalEyebrow">Lens</div><h3 id="modalTitle" style="margin:3px 0">Résultats</h3></div><button class="round" id="modalClose">×</button></div><div id="modalBody"></div></div></div>
+<div class="toast" id="toast">OK</div>
+<canvas id="capture" hidden></canvas>
+</main></div>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="/app-1.js"></script><script src="/app-2.js"></script><script src="/app-3.js"></script><script src="/app-4.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "createdAt": "2026-10-16T00:00:00Z",
+  "priceGuides": [
+    {
+      "idProduct": 12345,
+      "idCategory": 51,
+      "avg": 186.0,
+      "low": 175.0,
+      "trend": 185.0,
+      "avg1": 184.0,
+      "avg7": 181.0,
+      "avg30": 176.0,
+      "avg-holo": 210.0,
+      "trend-holo": 205.0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.tmp-*/
+.env
+.env.*
+!.env.example
+.DS_Store
+.gradle/
+android/local.properties
+ios/DerivedData/
+*.xcuserstate
+.vercel/
+coverage/
+*.log

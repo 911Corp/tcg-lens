@@ -1,0 +1,5 @@
+{
+  "fr": [{"id":"sample-001","localId":"001","name":"Carte Test FR","rarity":"Rare","set":{"id":"sample-set","name":"Set Démo","cardCount":{"official":1,"total":1}}}],
+  "en": [{"id":"sample-001","localId":"001","name":"Test Card EN","rarity":"Rare","set":{"id":"sample-set","name":"Demo Set","cardCount":{"official":1,"total":1}}}],
+  "ja": [{"id":"sample-001","localId":"001","name":"テストカード","rarity":"レア","set":{"id":"sample-set","name":"デモセット","cardCount":{"official":1,"total":1}}}]
+}
