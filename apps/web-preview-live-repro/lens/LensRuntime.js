@@ -17,6 +17,7 @@ import { LensStateMachine } from './LensStateMachine.js';
 import { MarketOverlay } from './MarketOverlay.js';
 import { Telemetry } from './Telemetry.js';
 import { createTrackToken, isTrackTokenCurrent, createIdentityToken, isIdentityTokenCurrent } from './IdentityGuard.js';
+import { ChangeDetector } from './ChangeDetector.js';
 
 export class LensRuntime {
   constructor({ video, trackLayer, resultOverlay, statusPill, debugNode = null, policy = {} }) {
@@ -114,7 +115,10 @@ export class LensRuntime {
       this._maybeBarcode(at);
       return;
     }
-    if (!this.context || priorGeneration !== track.generation || this.context.generation !== track.generation) this._newContext(track);
+    if (!this.context || priorGeneration !== track.generation || this.context.generation !== track.generation) {
+      const resetState = Boolean(this.context && this.context.generation !== track.generation);
+      this._newContext(track, { resetState, reason: resetState ? 'tracker_generation_changed' : 'track_context_created' });
+    }
     this._renderTrack(track);
     if (!track.stable) {
       this._safeTransition(LENS_STATES.TRACKING, { hits: track.hits });
@@ -135,7 +139,7 @@ export class LensRuntime {
     this._maybeBarcode(at);
   }
 
-  _newContext(track) {
+  _newContext(track, { resetState = false, reason = 'track_generation' } = {}) {
     this.context = {
       generation: track.generation,
       consensus: new TemporalConsensus({
@@ -145,10 +149,17 @@ export class LensRuntime {
       }),
       visualCandidates: [], visualEvidence: null, ocrEvidence: null,
       lastVisualAt: 0, lastOcrAt: 0, visualInFlight: false, ocrInFlight: false,
-      locked: null, changeCandidate: null, changeVotes: 0, lastQuality: null,
+      locked: null,
+      changeDetector: new ChangeDetector({
+        minScore: this.policy.changeVisualScore,
+        minMargin: this.policy.changeVisualMargin,
+        votesRequired: this.policy.changeVotes,
+      }),
+      lastQuality: null,
     };
     this.bestFrame.reset();
-    this.telemetry.emit('TRACK_GENERATION', { generation: track.generation, trackId: track.id });
+    if (resetState) this.stateMachine.reset({ reason, generation: track.generation, trackId: track.id });
+    this.telemetry.emit('TRACK_GENERATION', { generation: track.generation, trackId: track.id, resetState, reason });
   }
 
   async _launchVisual(track, frame, forced = false) {
@@ -184,7 +195,6 @@ export class LensRuntime {
         temporalPending: temporal.pendingSwitch, temporalEpoch: temporal.epoch,
       });
       if (c.locked) { this._observePossibleChange(top, margin); return; }
-      this._safeTransition(LENS_STATES.VERIFYING, { candidateId: top.id });
       this._evaluateEvidence();
       if (forced && !c.locked && frame.quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, frame.canvas);
     } catch (error) {
@@ -232,35 +242,59 @@ export class LensRuntime {
     const decision = this.fusion.evaluate({ temporal, visual: c.visualEvidence, ocr: c.ocrEvidence, canonical });
     this.telemetry.emit('FUSION', decision);
     if (decision.decision === 'LOCK') this._lock(decision, canonical.candidate || c.visualCandidates[0]);
-    else if (decision.decision === 'AMBIGUOUS') { this._safeTransition(LENS_STATES.AMBIGUOUS, { reason: decision.reason }); this.marketOverlay.pending('AMBIGUOUS', 'Preuves insuffisantes'); }
-    else if (decision.decision === 'VERIFY') { this._safeTransition(LENS_STATES.VERIFYING, { candidateId: decision.candidateId }); this.marketOverlay.pending('VERIFYING', 'Confirmation multi-frame'); }
-    else { this._safeTransition(LENS_STATES.ANALYZING, { reason: decision.reason }); this.marketOverlay.pending('ANALYZING', 'Comparaison visuelle'); }
+    else if (decision.decision === 'AMBIGUOUS') {
+      if (this._safeTransition(LENS_STATES.AMBIGUOUS, { reason: decision.reason })) this.marketOverlay.pending('AMBIGUOUS', 'Preuves insuffisantes');
+    } else if (decision.decision === 'VERIFY') {
+      if (this._safeTransition(LENS_STATES.VERIFYING, { candidateId: decision.candidateId, reason: decision.reason })) this.marketOverlay.pending('VERIFYING', 'Confirmation multi-frame');
+    } else {
+      if (this._safeTransition(LENS_STATES.ANALYZING, { reason: decision.reason })) this.marketOverlay.pending('ANALYZING', 'Comparaison visuelle');
+    }
   }
 
   _lock(decision, candidate) {
-    const c = this.context; if (!c || !candidate?.id) return;
-    c.locked = { id: candidate.id, confidence: decision.confidence };
-    this._safeTransition(LENS_STATES.LOCKED, { id: candidate.id, confidence: decision.confidence, reason: decision.reason });
+    const c = this.context; if (!c || !candidate?.id) return false;
+    const detail = { id: candidate.id, confidence: decision.confidence, reason: decision.reason };
+    if (!this._safeTransition(LENS_STATES.LOCKED, detail)) {
+      this.telemetry.emit('LOCK_REJECTED_STATE', { ...detail, state: this.stateMachine.state });
+      return false;
+    }
     const identity = { ...candidate, lang: candidate.lang || this.lang };
+    c.locked = { id: candidate.id, confidence: decision.confidence, identity };
     this.marketOverlay.showLocked(identity, decision.confidence);
     this._renderTrack(this.tracker.track);
+    return true;
   }
 
   _observePossibleChange(candidate, margin) {
-    const c = this.context; if (!c?.locked || !candidate?.embeddingVerified) return;
-    if (candidate.id === c.locked.id) {
-      c.changeCandidate = null; c.changeVotes = 0;
-      if (this.stateMachine.state === LENS_STATES.CHANGE_PENDING) this._safeTransition(LENS_STATES.LOCKED, { id: c.locked.id, reason: 'same_card_reconfirmed' });
+    const c = this.context;
+    if (!c?.locked || !c.changeDetector) return;
+    if (![LENS_STATES.LOCKED, LENS_STATES.CHANGE_PENDING].includes(this.stateMachine.state)) {
+      this.telemetry.emit('CHANGE_REJECTED_STATE', { state: this.stateMachine.state, candidateId: candidate?.id || null });
       return;
     }
-    if (candidate.score < this.policy.lockVisualScore || margin < this.policy.lockVisualMargin) return;
-    if (c.changeCandidate === candidate.id) c.changeVotes++; else { c.changeCandidate = candidate.id; c.changeVotes = 1; }
-    this._safeTransition(LENS_STATES.CHANGE_PENDING, { candidateId: candidate.id, votes: c.changeVotes });
+    const result = c.changeDetector.observe({
+      lockedCandidateId: c.locked.id,
+      candidate: { ...candidate, margin },
+    });
+    this.telemetry.emit('CHANGE_EVIDENCE', result);
+
+    if (result.action === 'SAME' || result.action === 'INSUFFICIENT' || result.action === 'RESET') {
+      if (this.stateMachine.state === LENS_STATES.CHANGE_PENDING) {
+        if (this._safeTransition(LENS_STATES.LOCKED, { id: c.locked.id, reason: result.reason })) {
+          this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
+        }
+      }
+      return;
+    }
+
+    if (!this._safeTransition(LENS_STATES.CHANGE_PENDING, { candidateId: result.candidateId, votes: result.votes, reason: result.reason })) return;
     this.marketOverlay.pending('CHANGE', 'Nouvelle carte détectée');
-    if (c.changeVotes >= this.policy.changeVotes) {
-      const track = this.tracker.bumpGeneration(); this._newContext(track);
-      this._safeTransition(LENS_STATES.TRACKING, { reason: 'confirmed_card_change' });
-      this.marketOverlay.pending('TRACKING', 'Nouvelle carte');
+    if (result.action === 'CONFIRMED') {
+      const track = this.tracker.bumpGeneration();
+      this._newContext(track, { resetState: false, reason: 'confirmed_card_change' });
+      if (this._safeTransition(LENS_STATES.TRACKING, { reason: 'confirmed_card_change', candidateId: result.candidateId })) {
+        this.marketOverlay.pending('TRACKING', 'Nouvelle carte');
+      }
     }
   }
 
@@ -276,8 +310,21 @@ export class LensRuntime {
       }
       this.telemetry.emit('BARCODE', { code: result.code, verified: result.verified });
       if (result.verified && result.match && this.context && !this.context.locked) {
-        const c = this.context; c.locked = { id: result.candidateId, confidence: 0.995 };
-        this._safeTransition(LENS_STATES.LOCKED, { id: result.candidateId, reason: 'verified_barcode' });
+        if (!this.tracker.track?.stable) {
+          this.telemetry.emit('BARCODE_LOCK_DEFERRED', { reason: 'track_not_stable', candidateId: result.candidateId });
+          return;
+        }
+        if ([LENS_STATES.TRACKING, LENS_STATES.UNKNOWN, LENS_STATES.AMBIGUOUS].includes(this.stateMachine.state)) {
+          if (!this._safeTransition(LENS_STATES.ANALYZING, { reason: 'verified_barcode' })) return;
+        }
+        if (this.stateMachine.state === LENS_STATES.ANALYZING) {
+          if (!this._safeTransition(LENS_STATES.VERIFYING, { candidateId: result.candidateId, reason: 'verified_barcode' })) return;
+        }
+        if (this.stateMachine.state !== LENS_STATES.VERIFYING) {
+          this.telemetry.emit('BARCODE_LOCK_REJECTED_STATE', { state: this.stateMachine.state, candidateId: result.candidateId });
+          return;
+        }
+        this._lock({ candidateId: result.candidateId, confidence: 0.995, reason: 'verified_barcode' }, { ...result.match, id: result.candidateId });
       }
     }).finally(() => { this.barcodeInFlight = false; });
   }
@@ -309,19 +356,17 @@ export class LensRuntime {
   _setPill(text) { if (this.statusPill) this.statusPill.textContent = text; }
 
   _safeTransition(next, detail) {
-    if (this.stateMachine.state === next) return this.stateMachine.transition(next, detail);
-    try { return this.stateMachine.transition(next, detail); }
-    catch {
-      if (next === LENS_STATES.ACQUIRING) return this.stateMachine.reset(detail);
-      this.stateMachine.reset({ reason: 'transition_recovery' });
-      if (next === LENS_STATES.TRACKING || next === LENS_STATES.ERROR) return this.stateMachine.transition(next, detail);
-      if (next === LENS_STATES.ANALYZING || next === LENS_STATES.VERIFYING || next === LENS_STATES.UNKNOWN || next === LENS_STATES.AMBIGUOUS || next === LENS_STATES.LOCKED) {
-        this.stateMachine.transition(LENS_STATES.TRACKING, detail);
-        if (next !== LENS_STATES.TRACKING) this.stateMachine.transition(LENS_STATES.ANALYZING, detail);
-        if (next === LENS_STATES.VERIFYING || next === LENS_STATES.LOCKED) this.stateMachine.transition(LENS_STATES.VERIFYING, detail);
-        if (next === LENS_STATES.LOCKED) this.stateMachine.transition(LENS_STATES.LOCKED, detail);
-        else if (next === LENS_STATES.UNKNOWN || next === LENS_STATES.AMBIGUOUS) this.stateMachine.transition(next, detail);
-      }
+    if (next === LENS_STATES.ACQUIRING) return this.stateMachine.reset(detail);
+    try {
+      return this.stateMachine.transition(next, detail);
+    } catch (error) {
+      this.telemetry.emit('STATE_TRANSITION_REJECTED', {
+        from: this.stateMachine.state,
+        to: next,
+        detail,
+        message: error.message,
+      });
+      return false;
     }
   }
 

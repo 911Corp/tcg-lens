@@ -23,7 +23,7 @@
     "test:sealed:integration": "npm run test:sealed-integration -w @tcglens/ingestion-worker",
     "preview:web": "node apps/web-preview/server.mjs",
     "validate:local": "bash scripts/validate-local.sh",
-    "test:lens": "node --test apps/web-preview-live-repro/test/lens-runtime.test.js"
+    "test:lens": "node --test apps/web-preview-live-repro/test/*.test.js"
   },
   "type": "module"
 }

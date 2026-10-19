@@ -8,6 +8,7 @@ import { EvidenceFusion } from '../lens/EvidenceFusion.js';
 import { LENS_STATES } from '../lens/config.js';
 import { TrackManager } from '../lens/TrackManager.js';
 import { createIdentityToken, isIdentityTokenCurrent, createTrackToken, isTrackTokenCurrent } from '../lens/IdentityGuard.js';
+import { ChangeDetector } from '../lens/ChangeDetector.js';
 
 function temporal(candidateId, votes, score = 0.97, margin = 0.10, quality = 0.7) {
   const c = new TemporalConsensus();
@@ -20,6 +21,8 @@ const visual = (candidateId = 'sv01-001', score = 0.97, margin = 0.10, embedding
 test('state machine cannot jump from acquiring directly to locked', () => {
   const sm = new LensStateMachine();
   assert.throws(() => sm.transition(LENS_STATES.LOCKED), /Illegal Lens transition/);
+  assert.equal(sm.state, LENS_STATES.ACQUIRING);
+  assert.equal(sm.canTransition(LENS_STATES.LOCKED), false);
   sm.transition(LENS_STATES.TRACKING);
   sm.transition(LENS_STATES.ANALYZING);
   sm.transition(LENS_STATES.VERIFYING);
@@ -194,4 +197,44 @@ test('track token rejects delayed barcode result after a new generation or track
   const replacementContext = { generation: 6 };
   const replacementTrack = { id: 11, generation: 6 };
   assert.equal(isTrackTokenCurrent({ running: true, context: replacementContext, track: replacementTrack }, token), false);
+});
+
+
+test('change detector requires consecutive strong observations of the same new identity', () => {
+  const detector = new ChangeDetector({ minScore: 0.95, minMargin: 0.08, votesRequired: 3 });
+  const b = { id: 'b', score: 0.98, margin: 0.11, embeddingVerified: true };
+  assert.equal(detector.observe({ lockedCandidateId: 'a', candidate: b }).action, 'PENDING');
+  assert.equal(detector.observe({ lockedCandidateId: 'a', candidate: b }).votes, 2);
+  const confirmed = detector.observe({ lockedCandidateId: 'a', candidate: b });
+  assert.equal(confirmed.action, 'CONFIRMED');
+  assert.equal(confirmed.votes, 3);
+});
+
+test('weak or conflicting change evidence resets consecutive change votes', () => {
+  const detector = new ChangeDetector({ minScore: 0.95, minMargin: 0.08, votesRequired: 3 });
+  const strongB = { id: 'b', score: 0.98, margin: 0.11, embeddingVerified: true };
+  detector.observe({ lockedCandidateId: 'a', candidate: strongB });
+  detector.observe({ lockedCandidateId: 'a', candidate: strongB });
+  const weakB = detector.observe({ lockedCandidateId: 'a', candidate: { ...strongB, score: 0.93 } });
+  assert.equal(weakB.action, 'INSUFFICIENT');
+  const restarted = detector.observe({ lockedCandidateId: 'a', candidate: strongB });
+  assert.equal(restarted.votes, 1);
+  const c = detector.observe({ lockedCandidateId: 'a', candidate: { ...strongB, id: 'c' } });
+  assert.equal(c.candidateId, 'c');
+  assert.equal(c.votes, 1);
+});
+
+test('reconfirming the locked identity cancels a pending change', () => {
+  const detector = new ChangeDetector({ votesRequired: 3 });
+  detector.observe({ lockedCandidateId: 'a', candidate: { id: 'b', score: 0.99, margin: 0.12, embeddingVerified: true } });
+  const same = detector.observe({ lockedCandidateId: 'a', candidate: { id: 'a', score: 0.99, margin: 0.12, embeddingVerified: true } });
+  assert.equal(same.action, 'SAME');
+  const nextB = detector.observe({ lockedCandidateId: 'a', candidate: { id: 'b', score: 0.99, margin: 0.12, embeddingVerified: true } });
+  assert.equal(nextB.votes, 1);
+});
+
+test('runtime source contains no synthetic transition recovery path', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '../lens/LensRuntime.js'), 'utf8');
+  assert.equal(source.includes('transition_recovery'), false);
+  assert.equal(source.includes("stateMachine.transition(LENS_STATES.TRACKING, detail)"), false);
 });

@@ -32,6 +32,8 @@ export const DEFAULT_POLICY = Object.freeze({
   temporalSwitchScore: 0.94,
   temporalSwitchMargin: 0.06,
   temporalSwitchVotes: 2,
+  changeVisualScore: 0.95,
+  changeVisualMargin: 0.08,
   changeVotes: 3,
   maxIndexRefs: 1200,
   warmBatch: 18,

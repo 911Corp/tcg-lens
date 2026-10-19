@@ -44,7 +44,7 @@ node --check apps/web-preview-live-repro/app-3.js
 node --check apps/web-preview-live-repro/app-4.js
 
 echo '[8/8] Lens runtime policy tests'
-node --test apps/web-preview-live-repro/test/lens-runtime.test.js
+node --test apps/web-preview-live-repro/test/*.test.js
 
 echo 'VALIDATION OK'
 echo 'Note: Android APK build requires Android SDK/Gradle; iOS binary build requires Xcode on macOS.'

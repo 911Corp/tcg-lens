@@ -17,26 +17,37 @@ export class LensStateMachine {
     this.state = LENS_STATES.ACQUIRING;
     this.detail = null;
     this.onChange = onChange;
+    this.sequence = 0;
+  }
+
+  canTransition(next) {
+    return next === this.state || Boolean(ALLOWED[this.state]?.has(next));
   }
 
   transition(next, detail = null) {
     if (next === this.state) {
       this.detail = detail;
-      this.onChange({ state: this.state, detail: this.detail });
+      this.sequence += 1;
+      this.onChange({ state: this.state, previous: this.state, detail: this.detail, sequence: this.sequence, repeated: true });
       return true;
     }
     if (!ALLOWED[this.state]?.has(next)) {
       throw new Error(`Illegal Lens transition ${this.state} -> ${next}`);
     }
+    const previous = this.state;
     this.state = next;
     this.detail = detail;
-    this.onChange({ state: next, detail });
+    this.sequence += 1;
+    this.onChange({ state: next, previous, detail, sequence: this.sequence, repeated: false });
     return true;
   }
 
   reset(detail = null) {
+    const previous = this.state;
     this.state = LENS_STATES.ACQUIRING;
     this.detail = detail;
-    this.onChange({ state: this.state, detail });
+    this.sequence += 1;
+    this.onChange({ state: this.state, previous, detail, sequence: this.sequence, reset: true });
+    return true;
   }
 }
