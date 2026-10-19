@@ -10,6 +10,8 @@ import { TrackManager } from '../lens/TrackManager.js';
 import { createIdentityToken, isIdentityTokenCurrent, createTrackToken, isTrackTokenCurrent } from '../lens/IdentityGuard.js';
 import { ChangeDetector } from '../lens/ChangeDetector.js';
 import { validateCardQuad } from '../lens/QuadQuality.js';
+import { ContradictionEngine } from '../lens/ContradictionEngine.js';
+import { CanonicalResolver } from '../lens/CanonicalResolver.js';
 
 function temporal(candidateId, votes, score = 0.97, margin = 0.10, quality = 0.7) {
   const c = new TemporalConsensus();
@@ -279,4 +281,64 @@ test('quad quality rejects implausible aspect and major out-of-frame corners', (
   const outside = validateCardQuad([{ x: -80, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 560 }, { x: -80, y: 560 }], 640, 640);
   assert.equal(outside.valid, false);
   assert.equal(outside.reason, 'quad_out_of_bounds');
+});
+
+
+test('OCR name match alone cannot lock an exact card printing', () => {
+  const fusion = new EvidenceFusion();
+  const result = fusion.evaluate({
+    temporal: temporal('a', 4, 0.95, 0.08, 0.7),
+    visual: visual('a', 0.95, 0.08, true),
+    ocr: { candidateId: 'a', collectorExact: false, strongNameMatch: true, contradiction: false },
+    canonical: { conflict: false },
+  });
+  assert.equal(result.decision, 'VERIFY');
+  assert.notEqual(result.reason, 'visual_temporal_plus_exact_collector');
+});
+
+test('exact collector OCR remains sufficient independent corroboration for a stable printing', () => {
+  const fusion = new EvidenceFusion();
+  const result = fusion.evaluate({
+    temporal: temporal('a', 4, 0.95, 0.08, 0.7),
+    visual: visual('a', 0.95, 0.08, true),
+    ocr: { candidateId: 'a', collectorExact: true, strongNameMatch: false, contradiction: false },
+    canonical: { conflict: false },
+  });
+  assert.equal(result.decision, 'LOCK');
+  assert.equal(result.reason, 'visual_temporal_plus_exact_collector');
+});
+
+test('different OCR name-only candidate is soft disagreement, not a false exact-print contradiction', () => {
+  const engine = new ContradictionEngine();
+  const result = engine.evaluate({
+    candidateId: 'a',
+    temporal: { top: { candidateId: 'a' } },
+    visual: { candidateId: 'a' },
+    ocr: { candidateId: 'b', collectorExact: false, strongNameMatch: true, contradiction: false },
+    canonical: { conflict: false },
+  });
+  assert.equal(result.hardBlock, false);
+  assert.deepEqual(result.softReasons, ['ocr_name_only_disagreement']);
+});
+
+test('different exact collector OCR is always a hard contradiction regardless of visual score', () => {
+  const fusion = new EvidenceFusion();
+  const result = fusion.evaluate({
+    temporal: temporal('a', 8, 0.999, 0.20, 0.9),
+    visual: visual('a', 0.999, 0.20, true),
+    ocr: { candidateId: 'b', collectorExact: true, strongNameMatch: true, contradiction: false },
+    canonical: { conflict: false },
+  });
+  assert.equal(result.decision, 'AMBIGUOUS');
+  assert.equal(result.reason, 'ocr_collector_contradiction');
+});
+
+test('canonical resolver treats name-only support as concept evidence, not printing identity', () => {
+  const resolver = new CanonicalResolver();
+  const sameName = resolver.resolve({ visualCandidates: [{ id: 'a' }], ocr: { candidateId: 'a', collectorExact: false, strongNameMatch: true, contradiction: false } });
+  assert.equal(sameName.conflict, false);
+  assert.equal(sameName.reason, 'concept_only_corroborated');
+  const otherNameOnly = resolver.resolve({ visualCandidates: [{ id: 'a' }], ocr: { candidateId: 'b', collectorExact: false, strongNameMatch: true, contradiction: false } });
+  assert.equal(otherNameOnly.conflict, false);
+  assert.equal(otherNameOnly.reason, 'visual_ranked');
 });

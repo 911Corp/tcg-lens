@@ -36,6 +36,8 @@ export class OCRAdapter {
       candidateId: best?.id || null,
       collectorExact: Boolean(best?.collectorExact),
       strongNameMatch: Boolean(best?.nameScore >= 0.72),
+      printingSupport: Boolean(best?.collectorExact),
+      conceptSupport: Boolean(best?.nameScore >= 0.72),
       contradiction: Boolean(best?.contradiction),
     };
   }

@@ -1,8 +1,10 @@
 import { DEFAULT_POLICY } from './config.js';
+import { ContradictionEngine } from './ContradictionEngine.js';
 
 export class EvidenceFusion {
   constructor(policy = {}) {
     this.policy = { ...DEFAULT_POLICY, ...policy };
+    this.contradictions = new ContradictionEngine();
   }
 
   evaluate({ temporal, visual, ocr = null, barcode = null, canonical = null }) {
@@ -30,28 +32,37 @@ export class EvidenceFusion {
     const qualityOk = top.avgQuality >= p.lockMinAverageQuality;
     const candidateId = top.candidateId;
 
-    const ocrContradiction = Boolean(
-      ocr?.candidateId && ocr.candidateId !== candidateId && (ocr.collectorExact || ocr.strongNameMatch)
-    );
-    const canonicalContradiction = Boolean(canonical?.conflict);
-    if (ocrContradiction || canonicalContradiction) {
-      return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: ocrContradiction ? 'ocr_contradiction' : 'canonical_conflict' };
+    const contradiction = this.contradictions.evaluate({ candidateId, temporal, visual, ocr, barcode, canonical });
+    if (contradiction.hardBlock) {
+      return {
+        decision: 'AMBIGUOUS',
+        candidateId: null,
+        confidence: 0,
+        reason: contradiction.hardReasons[0],
+        contradictions: contradiction,
+      };
     }
 
     if (!marginOk && top.votes >= p.minTemporalVotes) {
       return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: 'top1_top2_margin_too_small' };
     }
 
-    const ocrSupports = Boolean(
-      ocr?.candidateId === candidateId && (ocr.collectorExact || ocr.strongNameMatch) && !ocr.contradiction
+    const ocrPrintingSupports = Boolean(
+      ocr?.candidateId === candidateId && ocr.collectorExact === true && !ocr.contradiction
+    );
+    const ocrConceptSupports = Boolean(
+      ocr?.candidateId === candidateId && ocr.strongNameMatch === true && !ocr.contradiction
     );
     if (votesOk && scoreOk && marginOk && !qualityOk) {
       return { decision: 'CONTINUE', candidateId, confidence: 0, reason: 'frame_quality_insufficient_for_lock' };
     }
 
-    if (votesOk && scoreOk && marginOk && qualityOk && ocrSupports) {
+    if (votesOk && scoreOk && marginOk && qualityOk && ocrPrintingSupports) {
       const confidence = Math.min(0.995, 0.72 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.012);
-      return { decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_ocr' };
+      return {
+        decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_exact_collector',
+        evidence: { ocrPrintingSupports: true, ocrConceptSupports, softContradictions: contradiction.softReasons },
+      };
     }
 
     const visualOnlyExtreme = visual.embeddingVerified === true
@@ -61,7 +72,10 @@ export class EvidenceFusion {
       && top.avgQuality >= p.visualOnlyMinAverageQuality;
     if (visualOnlyExtreme && !ocr?.contradiction) {
       const confidence = Math.min(0.985, 0.78 + top.avgScore * 0.12 + top.avgMargin * 0.45 + Math.min(top.votes, 7) * 0.009);
-      return { decision: 'LOCK', candidateId, confidence, reason: 'extreme_temporal_visual_consensus' };
+      return {
+        decision: 'LOCK', candidateId, confidence, reason: 'extreme_temporal_visual_consensus',
+        evidence: { ocrPrintingSupports: false, ocrConceptSupports, softContradictions: contradiction.softReasons },
+      };
     }
 
     if (top.votes >= p.visualOnlyVotes && top.avgScore >= p.visualOnlyScore && top.avgMargin >= p.visualOnlyMargin && top.avgQuality < p.visualOnlyMinAverageQuality) {
