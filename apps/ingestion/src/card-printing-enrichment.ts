@@ -42,7 +42,12 @@ export async function enrichCardmarketPrinting(db: SqlClient, input: {
       await recordDecision(db, input.sourceRecordId, 'CONFLICT', already[0], 'CARDMARKET_VERIFIED_LINK_DRIFT', 1, already.length);
       return { status: 'CONFLICT', entityIds: already, ruleId: 'CARDMARKET_VERIFIED_LINK_DRIFT' };
     }
-    for (const entityId of already) await persistCardmarketEvidence(db, input, entityId, 'EXISTING_VERIFIED_LINK');
+    // Re-enrichment must reuse the language scope of the mapped printing; persisting with an
+    // empty scope here created a second verified external_identifiers row on every re-run.
+    for (const entityId of already) {
+      const languageCode = mapped.find(candidate => candidate.entity_id === entityId)?.language_code ?? '';
+      await persistCardmarketEvidence(db, input, entityId, 'EXISTING_VERIFIED_LINK', languageCode);
+    }
     if (already.length === 1) await markSourceRecord(db, input.sourceRecordId, 'CANONICAL', already[0]);
     await recordDecision(db, input.sourceRecordId, 'AUTO_MATCH', already[0], 'CARDMARKET_VERIFIED_PRODUCT_LINK', 0.995, already.length);
     return { status: 'AUTO_MATCH', entityIds: already, ruleId: 'CARDMARKET_VERIFIED_PRODUCT_LINK' };
