@@ -1,3 +1,5 @@
+import { corroborateCandidate, parseCollectorText } from './MetadataCorroboration.js';
+
 export class OCRAdapter {
   constructor() {
     this.worker = null;
@@ -28,7 +30,7 @@ export class OCRAdapter {
     const bottomResult = await worker.recognize(bottom);
     const topText = (topResult.data?.text || '').replace(/\s+/g, ' ').trim();
     const bottomText = (bottomResult.data?.text || '').replace(/\s+/g, ' ').trim();
-    const parsed = this.parse(`${topText} ${bottomText}`);
+    const parsed = this.parse(`${topText} ${bottomText}`, bottomText);
     const candidates = await this.resolveCandidates(parsed, lang, visualCandidates);
     const best = candidates[0] || null;
     return {
@@ -42,35 +44,45 @@ export class OCRAdapter {
     };
   }
 
-  parse(text) {
-    const numberMatches = text.match(/(?:^|\s)([A-Z]{0,4}\s*\d{1,4})(?:\s*\/\s*\d{1,4})?(?=\s|$)/gi) || [];
-    const collector = (numberMatches.map(x => x.trim()).find(x => /\d/.test(x)) || '').replace(/\/.*$/, '').replace(/\s+/g, '');
+  parse(text, collectorText = text) {
+    // v0.3.1: keep the printed total ("199/165") and set code; a bare local number is weak evidence.
+    const printed = parseCollectorText(collectorText);
+    const fallback = printed.number ? printed : parseCollectorText(text);
     const words = text.split(/[^\p{L}\p{N}-]+/u).filter(w => w.length >= 4 && !/^\d+$/.test(w));
-    return { collector, words, text };
+    return { collector: fallback.number || '', printedTotal: fallback.printedTotal, setCode: fallback.setCode, words, text };
   }
 
   async resolveCandidates(parsed, lang, visualCandidates) {
+    // Canonical-pool lookup (never live TCGdex): number + printed total narrows to real printings.
     let pool = [];
     if (parsed.collector) {
-      try { const r = await fetch(`/api/cards?lang=${lang}&localId=${encodeURIComponent(parsed.collector)}`); if (r.ok) pool = (await r.json()).items || []; } catch {}
+      const params = new URLSearchParams({ lang, number: parsed.collector });
+      if (parsed.printedTotal) params.set('total', String(parsed.printedTotal));
+      try { const r = await fetch(`/api/candidate-lookup?${params}`); if (r.ok) pool = (await r.json()).items || []; } catch {}
     }
-    if (!pool.length && parsed.words.length) {
-      for (const word of [...parsed.words].sort((a, b) => b.length - a.length).slice(0, 3)) {
-        try { const r = await fetch(`/api/cards?lang=${lang}&q=${encodeURIComponent(word)}`); if (r.ok) { pool = (await r.json()).items || []; if (pool.length) break; } } catch {}
-      }
-    }
+    // Visual top-K candidates carry their canonical metadata; always evaluate them directly.
+    const byId = new Map();
+    for (const card of [...visualCandidates, ...pool]) if (card?.id && !byId.has(card.id)) byId.set(card.id, card);
     const visualIds = new Set(visualCandidates.map(x => x.id));
     const text = parsed.text.toLowerCase();
-    const ranked = pool.map(card => {
+    const ranked = [...byId.values()].map(card => {
+      const meta = corroborateCandidate(card, { number: parsed.collector || null, printedTotal: parsed.printedTotal ?? null, setCode: parsed.setCode ?? null });
       const name = String(card.name || '').toLowerCase();
-      const collectorExact = Boolean(parsed.collector && String(card.localId || '').toLowerCase() === parsed.collector.toLowerCase());
       const nameScore = tokenScore(name, parsed.words, text);
       const visualSupport = visualIds.has(card.id);
-      return { ...card, collectorExact, nameScore, visualSupport, score: (collectorExact ? 0.55 : 0) + nameScore * 0.25 + (visualSupport ? 0.20 : 0) };
+      return { ...card, meta, collectorExact: meta.printingSupport, numberOnly: meta.numberOnly, nameScore, visualSupport,
+        score: (meta.printingSupport ? 0.55 : 0) + nameScore * 0.25 + (visualSupport ? 0.20 : 0) };
     }).sort((a, b) => b.score - a.score);
     const visualTop = visualCandidates[0]?.id;
     if (visualTop) {
-      const corroborated = ranked.find(x => x.id === visualTop && (x.collectorExact || x.nameScore >= 0.72));
+      const top = ranked.find(x => x.id === visualTop);
+      if (top?.meta?.contradicts) {
+        // Physical contradiction between the printed number/total and the visual top's canonical record.
+        top.contradiction = true;
+        top.contradictionReasons = top.meta.reasons;
+        return [top, ...ranked.filter(x => x.id !== visualTop)];
+      }
+      const corroborated = top && (top.collectorExact || top.nameScore >= 0.72) ? top : null;
       if (corroborated) return [corroborated, ...ranked.filter(x => x.id !== visualTop)];
       const strongOther = ranked.find(x => x.id !== visualTop && x.collectorExact && x.nameScore >= 0.55);
       if (strongOther) strongOther.contradiction = true;

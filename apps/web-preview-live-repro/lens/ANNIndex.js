@@ -13,7 +13,7 @@ export class ANNIndex {
   async open() {
     if (this.db || !('indexedDB' in window)) return this.db;
     this.db = await new Promise(resolve => {
-      const req = indexedDB.open('tcg-lens-ann-v2', 1);
+      const req = indexedDB.open('tcg-lens-ann-v3', 1);
       req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains('refs')) db.createObjectStore('refs', { keyPath: 'key' }); if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' }); };
       req.onsuccess = () => resolve(req.result); req.onerror = () => resolve(null);
     });
@@ -77,7 +77,7 @@ export class ANNIndex {
     this.warming = true;
     try {
       await this.load(lang);
-      let cursor = this.cursor.get(lang) || '1:0';
+      let cursor = this.cursor.get(lang) || '0';
       const params = new URLSearchParams({ lang, cursor, size: String(Math.max(batch, 24)) });
       const response = await fetch(`/api/visual-cards?${params}`); if (!response.ok) return;
       const payload = await response.json();
@@ -90,10 +90,17 @@ export class ANNIndex {
           const fast = Array.from(embedding.fastDescriptor(image));
           let deep = null;
           if (embedding.model) deep = Array.from(await embedding.embed(image));
-          await this.put({ key, id: card.id, name: card.name, localId: String(card.localId || ''), lang, setId: card.setId || null, setName: card.setName || null, image: card.image, fast, deep, at: Date.now() });
+          await this.put({
+            key, id: card.id, entityId: card.entityId || null, name: card.name, localId: String(card.localId || ''), lang,
+            setId: card.setId || null, setName: card.setName || null, setAbbreviation: card.setAbbreviation || null,
+            printedTotal: card.printedTotal ?? null, setReadiness: card.setReadiness || null,
+            visualOnlyLockAllowed: card.visualOnlyLockAllowed === true, poolBuildId: payload.buildId || null,
+            image: card.image, fast, deep, at: Date.now(),
+          });
         } catch {}
       }
-      cursor = payload.nextCursor || cursor; this.cursor.set(lang, cursor); await this._metaSet(`cursor:${lang}`, cursor);
+      if (payload.exhausted) cursor = '0'; else cursor = payload.nextCursor || cursor;
+      this.cursor.set(lang, cursor); await this._metaSet(`cursor:${lang}`, cursor);
     } finally { this.warming = false; }
   }
 

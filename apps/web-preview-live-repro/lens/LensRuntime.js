@@ -184,7 +184,7 @@ export class LensRuntime {
       const top = candidates[0], second = candidates[1];
       const margin = top.score - (second?.score ?? 0);
       const previousVisualCandidateId = c.visualEvidence?.candidateId || null;
-      c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, quality: frame.quality.score };
+      c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, visualOnlyLockAllowed: top.visualOnlyLockAllowed === true, quality: frame.quality.score };
       const temporal = c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
       if (c.ocrEpoch !== temporal.epoch) {
         this._resetOcrEvidence(c, { reason: 'temporal_epoch_changed', temporalEpoch: temporal.epoch });

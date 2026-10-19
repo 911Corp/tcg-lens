@@ -21,6 +21,8 @@ function temporal(candidateId, votes, score = 0.97, margin = 0.10, quality = 0.7
 }
 
 const visual = (candidateId = 'sv01-001', score = 0.97, margin = 0.10, embeddingVerified = true) => ({ candidateId, score, margin, embeddingVerified });
+// v0.3.1: a candidate whose canonical set is VISUAL_COMPLETE + RELEASED (candidate-pool flag).
+const visualFromCompleteSet = (...args) => ({ ...visual(...args), visualOnlyLockAllowed: true });
 
 test('state machine cannot jump from acquiring directly to locked', () => {
   const sm = new LensStateMachine();
@@ -78,8 +80,8 @@ test('strong OCR contradiction blocks visual lock', () => {
 
 test('extreme visual-only consensus requires five verified observations', () => {
   const fusion = new EvidenceFusion();
-  const four = fusion.evaluate({ temporal: temporal('a', 4, 0.98, 0.11), visual: visual('a', 0.98, 0.11), canonical: { conflict: false } });
-  const five = fusion.evaluate({ temporal: temporal('a', 5, 0.98, 0.11), visual: visual('a', 0.98, 0.11), canonical: { conflict: false } });
+  const four = fusion.evaluate({ temporal: temporal('a', 4, 0.98, 0.11), visual: visualFromCompleteSet('a', 0.98, 0.11), canonical: { conflict: false } });
+  const five = fusion.evaluate({ temporal: temporal('a', 5, 0.98, 0.11), visual: visualFromCompleteSet('a', 0.98, 0.11), canonical: { conflict: false } });
   assert.notEqual(four.decision, 'LOCK');
   assert.equal(five.decision, 'LOCK');
 });
@@ -258,7 +260,7 @@ test('low average frame quality blocks OCR-supported lock', () => {
 
 test('low average frame quality blocks extreme visual-only lock', () => {
   const fusion = new EvidenceFusion();
-  const result = fusion.evaluate({ temporal: temporal('a', 7, 0.99, 0.12, 0.50), visual: visual('a', 0.99, 0.12), canonical: { conflict: false } });
+  const result = fusion.evaluate({ temporal: temporal('a', 7, 0.99, 0.12, 0.50), visual: visualFromCompleteSet('a', 0.99, 0.12), canonical: { conflict: false } });
   assert.equal(result.decision, 'CONTINUE');
   assert.equal(result.reason, 'frame_quality_insufficient_for_visual_only_lock');
 });

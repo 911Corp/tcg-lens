@@ -22,7 +22,10 @@ export function expectedIdentityAtMs(t) {
   return replaySegments.find(segment => t >= segment.startMs && t < segment.endMs)?.expectedCandidateId ?? null;
 }
 
-export function runReplay({ corroborateB = false } = {}) {
+// visualOnlyLockAllowed models the candidate-pool flag (v0.3.1). The original A->empty->B->A
+// scenarios model references from a VISUAL_COMPLETE, released set, hence the default `true`.
+// ocrRead lets a scenario inject a raw printed-metadata read for the visual top (contradiction tests).
+export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null } = {}) {
   const policy = { ...DEFAULT_POLICY };
   const events = [];
   let now = 0;
@@ -126,7 +129,7 @@ export function runReplay({ corroborateB = false } = {}) {
     context.lastVisualAt = now;
     const id = row.top === 'a' ? 'test-a' : 'test-b';
     const candidate = { id, score: row.score, margin: row.margin, embeddingVerified: true };
-    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, quality: 0.8 };
+    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, quality: 0.8 };
     const temporal = context.consensus.observe({ candidateId: id, score: row.score, margin: row.margin, quality: 0.8, at: now });
     events.push({ t: now, type: 'VISUAL', candidateId: id, score: row.score, margin: row.margin, temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction, temporalEpoch: temporal.epoch, locked: context.locked?.id || null });
     if (!context.locked && corroborateB && id === 'test-b' && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4 && now - context.lastOcrAt >= policy.ocrIntervalMs) {
@@ -140,6 +143,14 @@ export function runReplay({ corroborateB = false } = {}) {
         at: now,
       }, 'test-b');
       events.push({ t: now, type: 'OCR_CONSENSUS', candidateId: context.ocrEvidence.candidateId, exactVotes: context.ocrEvidence.exactVotes, collectorExact: context.ocrEvidence.collectorExact });
+    }
+    if (!context.locked && ocrRead && temporal.top?.candidateId === id && now - context.lastOcrAt >= policy.ocrIntervalMs) {
+      const read = ocrRead({ candidateId: id, t: now });
+      if (read) {
+        context.lastOcrAt = now;
+        context.ocrEvidence = context.ocrConsensus.observe({ available: true, at: now, ...read }, id);
+        events.push({ t: now, type: 'OCR_CONSENSUS', candidateId: context.ocrEvidence.candidateId, exactVotes: context.ocrEvidence.exactVotes, collectorExact: context.ocrEvidence.collectorExact, contradiction: context.ocrEvidence.contradiction });
+      }
     }
     if (context.locked) observeChange(candidate);
     else evaluate();

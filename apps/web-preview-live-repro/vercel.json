@@ -1,1 +1,1 @@
-{"headers":[{"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"},{"key":"Permissions-Policy","value":"camera=(self)"}]}]}
+{"functions":{"api/*.js":{"includeFiles":"data/**"}},"headers":[{"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"},{"key":"Permissions-Policy","value":"camera=(self)"}]}]}

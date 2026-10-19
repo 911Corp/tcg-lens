@@ -65,7 +65,12 @@ export class EvidenceFusion {
       };
     }
 
+    // v0.3.1: visual-only locks are only permitted for candidates whose canonical set is visually
+    // complete and released (candidate-pool flag). Missing references elsewhere in a set mean a
+    // neighbour may be the true card; such candidates need OCR/printing corroboration to lock.
+    const visualOnlyPermitted = visual.visualOnlyLockAllowed === true;
     const visualOnlyExtreme = visual.embeddingVerified === true
+      && visualOnlyPermitted
       && top.votes >= p.visualOnlyVotes
       && top.avgScore >= p.visualOnlyScore
       && top.avgMargin >= p.visualOnlyMargin
@@ -76,6 +81,10 @@ export class EvidenceFusion {
         decision: 'LOCK', candidateId, confidence, reason: 'extreme_temporal_visual_consensus',
         evidence: { ocrPrintingSupports: false, ocrConceptSupports, softContradictions: contradiction.softReasons },
       };
+    }
+
+    if (!visualOnlyPermitted && visual.embeddingVerified === true && top.votes >= p.visualOnlyVotes && top.avgScore >= p.visualOnlyScore && top.avgMargin >= p.visualOnlyMargin) {
+      return { decision: 'VERIFY', candidateId, confidence: Math.min(0.89, visual.score * 0.86), reason: 'visual_only_lock_not_permitted_for_candidate_set' };
     }
 
     if (top.votes >= p.visualOnlyVotes && top.avgScore >= p.visualOnlyScore && top.avgMargin >= p.visualOnlyMargin && top.avgQuality < p.visualOnlyMinAverageQuality) {
