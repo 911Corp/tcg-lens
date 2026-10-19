@@ -1,4 +1,4 @@
-import { normalizeTextV1 } from './normalization.js';
+import { collectorNumberMatchKeyV1, normalizeTextV1 } from './normalization.js';
 import type { NormalizedCardmarketProduct } from './cardmarket.js';
 import type { NormalizedTcgcsvProduct } from './tcgcsv.js';
 
@@ -23,7 +23,8 @@ export function decideCardmarketEnrichment(product: NormalizedCardmarketProduct,
   if (product.productGroup !== 'single' || !product.collectorNumberNormalized) {
     return { status: 'CANDIDATE_MATCH', matches: [], ruleId: 'CARDMARKET_INSUFFICIENT_CARD_IDENTITY', confidence: 0.2 };
   }
-  const numberCandidates = candidates.filter(c => c.collector_number_normalized === product.collectorNumberNormalized);
+  const numberKey = collectorNumberMatchKeyV1(product.collectorNumberNormalized);
+  const numberCandidates = candidates.filter(c => collectorNumberMatchKeyV1(c.collector_number_normalized) === numberKey);
   const nameCandidates = numberCandidates.filter(c => normalizeTextV1(c.name) === product.normalizedName);
   if (product.normalizedExpansionName) {
     const setMatches = nameCandidates.filter(c => normalizeSetHint(c.set_name) === normalizeSetHint(product.normalizedExpansionName!));
@@ -41,7 +42,7 @@ export function decideTcgcsvEnrichment(product: NormalizedTcgcsvProduct, candida
   }
   const exactName = candidates.filter(c =>
     c.language_code === product.languageCode &&
-    c.collector_number_normalized === product.collectorNumberNormalized &&
+    collectorNumberMatchKeyV1(c.collector_number_normalized) === collectorNumberMatchKeyV1(product.collectorNumberNormalized) &&
     normalizeTextV1(c.name) === product.normalizedName
   );
   const setMatches = exactName.filter(c => setMatchesTcgcsv(c, product.groupName, product.groupAbbreviation));

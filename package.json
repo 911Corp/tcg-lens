@@ -11,7 +11,7 @@
     "typecheck": "npm run typecheck -w @tcglens/contracts && npm run typecheck -w @tcglens/resolution && npm run typecheck -w @tcglens/api && npm run typecheck:ingestion",
     "dev:api": "npm run dev -w @tcglens/api",
     "import:tcgdex": "npm run tcgdex -w @tcglens/ingestion-worker --",
-    "test:ingestion": "rm -rf .tmp-ingestion-test && tsc -p tsconfig.ingestion-test.json && node --test .tmp-ingestion-test/packages/ingestion/test/tcgdex-bootstrap.test.js",
+    "test:ingestion": "rm -rf .tmp-ingestion-test && tsc -p tsconfig.ingestion-test.json && node --test .tmp-ingestion-test/packages/ingestion/test/tcgdex-bootstrap.test.js .tmp-ingestion-test/packages/ingestion/test/catalog-policy.test.js",
     "import:tcgdex:summary": "npm run tcgdex:summary -w @tcglens/ingestion-worker",
     "typecheck:ingestion": "tsc -p apps/ingestion/tsconfig.json",
     "import:cardmarket": "npm run cardmarket -w @tcglens/ingestion-worker --",
@@ -24,7 +24,12 @@
     "preview:web": "node apps/web-preview/server.mjs",
     "validate:local": "bash scripts/validate-local.sh",
     "test:lens": "node --test apps/web-preview-live-repro/test/*.test.js",
-    "benchmark:lens": "node apps/web-preview-live-repro/benchmark/run-gold-replay.mjs"
+    "benchmark:lens": "node apps/web-preview-live-repro/benchmark/run-gold-replay.mjs",
+    "snapshot:tcgdex": "npm run tcgdex:snapshot -w @tcglens/ingestion-worker --",
+    "probe:images": "npm run images:probe -w @tcglens/ingestion-worker --",
+    "build:coverage": "npm run coverage:build -w @tcglens/ingestion-worker --",
+    "import:cardmarket:crosswalk": "npm run cardmarket:crosswalk -w @tcglens/ingestion-worker --",
+    "test:v031:integration": "npm run test:v031-integration -w @tcglens/ingestion-worker"
   },
   "type": "module"
 }

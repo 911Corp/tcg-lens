@@ -118,3 +118,18 @@ test('TCGCSV price normalizes TCGplayer subtype and metrics in USD', () => {
   assert.equal(price.metrics.find(x => x.metricType === 'MARKET')?.amount, 181);
   assert.equal(price.metrics[0]?.metadata.tcgplayer_subtype, 'Holofoil');
 });
+
+import { collectorNumberMatchKeyV1 } from '../src/index.js';
+
+test('collector-number match key is zero-padding insensitive across providers (v0.3.1)', () => {
+  assert.equal(collectorNumberMatchKeyV1('033'), collectorNumberMatchKeyV1('33'));
+  assert.equal(collectorNumberMatchKeyV1('TG05'), 'tg5');
+  assert.equal(collectorNumberMatchKeyV1('100'), '100');
+  assert.equal(collectorNumberMatchKeyV1('0'), '0');
+  assert.equal(collectorNumberMatchKeyV1('SV-P 012'), 'sv-p12');
+  assert.notEqual(collectorNumberMatchKeyV1('33'), collectorNumberMatchKeyV1('133'));
+  const product = normalizeTcgcsvProduct({ groupId: 2, name: 'SWSH02: Rebel Clash', abbreviation: 'RCL', categoryId: 3 },
+    { productId: 9, name: 'Chandelure', cleanName: 'Chandelure', categoryId: 3, groupId: 2, extendedData: [{ name: 'Number', value: '033/192' }] });
+  const decision = decideTcgcsvEnrichment(product, [{ entity_id: 'e', name: 'Chandelure', collector_number_normalized: '33', language_code: 'en', set_name: 'Rebel Clash', set_code: 'swsh2' }]);
+  assert.equal(decision.status, 'AUTO_MATCH');
+});

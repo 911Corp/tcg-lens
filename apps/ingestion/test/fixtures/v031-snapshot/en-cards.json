@@ -1,0 +1,209 @@
+[
+ {
+  "id": "itrel-001",
+  "localId": "001",
+  "name": "Alpha",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itrel",
+   "name": "ITREL",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itrel001n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/me/itrel/001"
+ },
+ {
+  "id": "itrel-002",
+  "localId": "002",
+  "name": "Beta",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itrel",
+   "name": "ITREL",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itrel002n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/me/itrel/002"
+ },
+ {
+  "id": "itgap-001",
+  "localId": "001",
+  "name": "Gamma",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itgap",
+   "name": "ITGAP",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itgap001n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/me/itgap/001"
+ },
+ {
+  "id": "itgap-002",
+  "localId": "002",
+  "name": "Delta",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itgap",
+   "name": "ITGAP",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itgap002n"
+   }
+  ]
+ },
+ {
+  "id": "itnext-001",
+  "localId": "001",
+  "name": "Epsilon",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itnext",
+   "name": "ITNEXT",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itnext001n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/me/itnext/001"
+ },
+ {
+  "id": "itnext-002",
+  "localId": "002",
+  "name": "Zeta",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itnext",
+   "name": "ITNEXT",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itnext002n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/me/itnext/002"
+ },
+ {
+  "id": "itpocket-001",
+  "localId": "001",
+  "name": "Eta",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itpocket",
+   "name": "ITPOCKET",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itpocket001n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/tcgp/itpocket/001"
+ },
+ {
+  "id": "itpocket-002",
+  "localId": "002",
+  "name": "Theta",
+  "category": "Pokemon",
+  "rarity": "Common",
+  "set": {
+   "id": "itpocket",
+   "name": "ITPOCKET",
+   "cardCount": {
+    "official": 2,
+    "total": 2
+   }
+  },
+  "variants": {
+   "normal": true
+  },
+  "variants_detailed": [
+   {
+    "type": "Normal",
+    "size": "Standard",
+    "variantId": "itpocket002n"
+   }
+  ],
+  "image": "https://assets.tcgdex.net/en/tcgp/itpocket/002"
+ }
+]

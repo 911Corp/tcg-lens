@@ -31,6 +31,18 @@ export function normalizeCollectorNumberV1(raw: string): NormalizedCollectorNumb
   return { raw, normalized: compact, numerator: suffix?.[1], suffix: suffix?.[2] };
 }
 
+/**
+ * v0.3.1 — Cross-source collector-number comparison key. Sources disagree on zero padding
+ * (TCGdex "33" vs TCGplayer "033/192"; TCGdex pads some sets but not others). The key strips
+ * leading zeros from every digit run and whitespace, lowercases, and is used ONLY to compare
+ * numbers across providers. It never replaces collector_number_normalized or canonical keys.
+ * Mirrors SQL collector_number_match_key() in migration 0008.
+ */
+export function collectorNumberMatchKeyV1(value: string | null | undefined): string {
+  if (value == null) return '';
+  return String(value).normalize('NFC').replace(/\s+/g, '').toLowerCase().replace(/(^|[^0-9])0+([0-9])/g, '$1$2');
+}
+
 export function canonicalPayload(parts: Record<string, unknown>): string {
   return Object.keys(parts)
     .sort()

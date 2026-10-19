@@ -7,3 +7,5 @@ export * from './tcgcsv.js';
 export * from './market-enrichment.js';
 export * from './sealed.js';
 export * from './barcode-registry.js';
+export * from './catalog-policy.js';
+export * from './cardmarket-crosswalk.js';

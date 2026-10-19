@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  collectorNumberMatchKeyV1,
   normalizeTextV1,
   type NormalizedCardmarketProduct,
   type NormalizedCardmarketPrice,
@@ -30,7 +31,7 @@ export async function enrichCardmarketPrinting(db: SqlClient, input: {
   if (already.length) {
     const mapped = await candidatesByEntityIds(db, already);
     const mismatches = mapped.filter(candidate =>
-      candidate.collector_number_normalized !== input.product.collectorNumberNormalized ||
+      collectorNumberMatchKeyV1(candidate.collector_number_normalized) !== collectorNumberMatchKeyV1(input.product.collectorNumberNormalized) ||
       normalizeTextV1(candidate.name) !== input.product.normalizedName
     );
     if (mismatches.length) {
@@ -85,7 +86,7 @@ export async function enrichTcgcsvPrinting(db: SqlClient, input: {
   if (ext.rows[0]) {
     const mapped = (await candidatesByEntityIds(db, [ext.rows[0].entity_id]))[0];
     if (!mapped || mapped.language_code !== input.product.languageCode ||
-        mapped.collector_number_normalized !== input.product.collectorNumberNormalized ||
+        collectorNumberMatchKeyV1(mapped.collector_number_normalized) !== collectorNumberMatchKeyV1(input.product.collectorNumberNormalized) ||
         normalizeTextV1(mapped.name) !== input.product.normalizedName) {
       await recordConflict(db, input.sourceRecordId, [ext.rows[0].entity_id], 'EXTERNAL_ID_COLLISION', {
         source: 'tcgplayer', productId: input.product.productId, incomingName: input.product.name,
@@ -247,7 +248,7 @@ async function candidatePrintings(db: SqlClient, collectorNumber: string, langua
        FROM card_printings cp
        JOIN card_sets cs ON cs.entity_id=cp.set_id
        JOIN catalog_entities ce ON ce.entity_id=cp.entity_id
-      WHERE cp.collector_number_normalized=$1${languageSql}
+      WHERE collector_number_match_key(cp.collector_number_normalized)=collector_number_match_key($1)${languageSql}
         AND ce.status='ACTIVE' AND ce.resolution_state='CANONICAL'`,
     values
   );

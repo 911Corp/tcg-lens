@@ -1,0 +1,89 @@
+[
+ {
+  "id": "itrel",
+  "name": "ITREL",
+  "releaseDate": "2026-09-16",
+  "serie": {
+   "id": "me",
+   "name": "Mega Evolution"
+  },
+  "cardCount": {
+   "official": 2,
+   "total": 2
+  },
+  "abbreviation": {
+   "official": "ITR"
+  },
+  "cards": [
+   {
+    "id": "itrel-001"
+   },
+   {
+    "id": "itrel-002"
+   }
+  ]
+ },
+ {
+  "id": "itgap",
+  "name": "ITGAP",
+  "releaseDate": "2026-09-16",
+  "serie": {
+   "id": "me",
+   "name": "Mega Evolution"
+  },
+  "cardCount": {
+   "official": 2,
+   "total": 2
+  },
+  "cards": [
+   {
+    "id": "itgap-001"
+   },
+   {
+    "id": "itgap-002"
+   }
+  ]
+ },
+ {
+  "id": "itnext",
+  "name": "ITNEXT",
+  "releaseDate": "2026-11-06",
+  "serie": {
+   "id": "me",
+   "name": "Mega Evolution"
+  },
+  "cardCount": {
+   "official": 2,
+   "total": 2
+  },
+  "cards": [
+   {
+    "id": "itnext-001"
+   },
+   {
+    "id": "itnext-002"
+   }
+  ]
+ },
+ {
+  "id": "itpocket",
+  "name": "ITPOCKET",
+  "releaseDate": "2026-08-01",
+  "serie": {
+   "id": "tcgp",
+   "name": "Pokemon TCG Pocket"
+  },
+  "cardCount": {
+   "official": 2,
+   "total": 2
+  },
+  "cards": [
+   {
+    "id": "itpocket-001"
+   },
+   {
+    "id": "itpocket-002"
+   }
+  ]
+ }
+]

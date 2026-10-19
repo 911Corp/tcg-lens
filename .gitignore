@@ -12,3 +12,7 @@ ios/DerivedData/
 .vercel/
 coverage/
 *.log
+data/snapshots/
+data/reports/*.tmp
+apps/web-preview-live-repro/data/candidate-pool-*.json
+.tmp-v031-it/
