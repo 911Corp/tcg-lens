@@ -12,6 +12,7 @@ import { ChangeDetector } from '../lens/ChangeDetector.js';
 import { validateCardQuad } from '../lens/QuadQuality.js';
 import { ContradictionEngine } from '../lens/ContradictionEngine.js';
 import { CanonicalResolver } from '../lens/CanonicalResolver.js';
+import { OCRConsensus } from '../lens/OCRConsensus.js';
 
 function temporal(candidateId, votes, score = 0.97, margin = 0.10, quality = 0.7) {
   const c = new TemporalConsensus();
@@ -341,4 +342,41 @@ test('canonical resolver treats name-only support as concept evidence, not print
   const otherNameOnly = resolver.resolve({ visualCandidates: [{ id: 'a' }], ocr: { candidateId: 'b', collectorExact: false, strongNameMatch: true, contradiction: false } });
   assert.equal(otherNameOnly.conflict, false);
   assert.equal(otherNameOnly.reason, 'visual_ranked');
+});
+
+
+test('one exact OCR read is not enough to corroborate an exact printing', () => {
+  const consensus = new OCRConsensus({ requiredExactVotes: 2, requiredNameVotes: 2 });
+  const one = consensus.observe({ available: true, candidateId: 'a', collectorExact: true, strongNameMatch: true, contradiction: false }, 'a');
+  assert.equal(one.exactVotes, 1);
+  assert.equal(one.collectorExact, false);
+  assert.equal(one.strongNameMatch, false);
+});
+
+test('two coherent exact OCR reads corroborate the same printing', () => {
+  const consensus = new OCRConsensus({ requiredExactVotes: 2, requiredNameVotes: 2 });
+  consensus.observe({ available: true, candidateId: 'a', collectorExact: true, strongNameMatch: true, contradiction: false }, 'a');
+  const two = consensus.observe({ available: true, candidateId: 'a', collectorExact: true, strongNameMatch: true, contradiction: false }, 'a');
+  assert.equal(two.exactVotes, 2);
+  assert.equal(two.collectorExact, true);
+  assert.equal(two.strongNameMatch, true);
+  assert.equal(two.contradiction, false);
+});
+
+test('a single exact OCR read for another candidate creates an immediate hard contradiction', () => {
+  const consensus = new OCRConsensus({ requiredExactVotes: 2 });
+  const result = consensus.observe({ available: true, candidateId: 'b', collectorExact: true, strongNameMatch: true, contradiction: false }, 'a');
+  assert.equal(result.collectorExact, false);
+  assert.equal(result.contradiction, true);
+  assert.equal(result.contradictionReason, 'ocr_exact_other_candidate');
+});
+
+test('OCR consensus reset removes support accumulated for a previous temporal epoch', () => {
+  const consensus = new OCRConsensus({ requiredExactVotes: 2 });
+  consensus.observe({ available: true, candidateId: 'a', collectorExact: true, strongNameMatch: true, contradiction: false }, 'a');
+  consensus.observe({ available: true, candidateId: 'a', collectorExact: true, strongNameMatch: true, contradiction: false }, 'a');
+  assert.equal(consensus.summary('a').collectorExact, true);
+  consensus.reset();
+  assert.equal(consensus.summary('a').collectorExact, false);
+  assert.equal(consensus.summary('a').observations, 0);
 });

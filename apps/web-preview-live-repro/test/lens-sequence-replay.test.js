@@ -8,6 +8,7 @@ import { TemporalConsensus } from '../lens/TemporalConsensus.js';
 import { EvidenceFusion } from '../lens/EvidenceFusion.js';
 import { LensStateMachine } from '../lens/LensStateMachine.js';
 import { ChangeDetector } from '../lens/ChangeDetector.js';
+import { OCRConsensus } from '../lens/OCRConsensus.js';
 
 const rows = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/a-empty-b-a-vision.json'), 'utf8'));
 const detection = { box: { x: 78, y: 94, w: 203, h: 278 }, quad: [{ x: 86, y: 98 }, { x: 272, y: 100 }, { x: 274, y: 364 }, { x: 80, y: 358 }] };
@@ -47,6 +48,13 @@ function runReplay({ corroborateB = false } = {}) {
         switchVotes: policy.temporalSwitchVotes,
       }),
       visualEvidence: null,
+      ocrEvidence: null,
+      ocrConsensus: new OCRConsensus({
+        requiredExactVotes: policy.ocrExactVotes,
+        requiredNameVotes: policy.ocrNameVotes,
+        maxObservations: policy.ocrMaxObservations,
+      }),
+      lastOcrAt: 0,
       lastVisualAt: 0,
       locked: null,
       changeDetector: new ChangeDetector({
@@ -68,10 +76,7 @@ function runReplay({ corroborateB = false } = {}) {
 
   function evaluate() {
     const temporal = context.consensus.summary();
-    const ocr = corroborateB && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4
-      ? { candidateId: 'test-b', collectorExact: true, strongNameMatch: true, contradiction: false }
-      : null;
-    const decision = fusion.evaluate({ temporal, visual: context.visualEvidence, ocr, canonical: { conflict: false } });
+    const decision = fusion.evaluate({ temporal, visual: context.visualEvidence, ocr: context.ocrEvidence, canonical: { conflict: false } });
     events.push({ t: now, type: 'FUSION', decision, temporal: temporal.top, temporalEpoch: temporal.epoch, temporalAction: temporal.lastAction });
     if (decision.decision === 'LOCK') lock(decision);
     else if (decision.decision === 'AMBIGUOUS') transition(LENS_STATES.AMBIGUOUS, { reason: decision.reason });
@@ -122,6 +127,18 @@ function runReplay({ corroborateB = false } = {}) {
     context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, quality: 0.8 };
     const temporal = context.consensus.observe({ candidateId: id, score: row.score, margin: row.margin, quality: 0.8, at: now });
     events.push({ t: now, type: 'VISUAL', candidateId: id, score: row.score, margin: row.margin, temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction, temporalEpoch: temporal.epoch, locked: context.locked?.id || null });
+    if (!context.locked && corroborateB && id === 'test-b' && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4 && now - context.lastOcrAt >= policy.ocrIntervalMs) {
+      context.lastOcrAt = now;
+      context.ocrEvidence = context.ocrConsensus.observe({
+        available: true,
+        candidateId: 'test-b',
+        collectorExact: true,
+        strongNameMatch: true,
+        contradiction: false,
+        at: now,
+      }, 'test-b');
+      events.push({ t: now, type: 'OCR_CONSENSUS', candidateId: context.ocrEvidence.candidateId, exactVotes: context.ocrEvidence.exactVotes, collectorExact: context.ocrEvidence.collectorExact });
+    }
     if (context.locked) observeChange(candidate);
     else evaluate();
   }

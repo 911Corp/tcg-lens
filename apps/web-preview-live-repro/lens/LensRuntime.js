@@ -9,6 +9,7 @@ import { BestFrameSelector } from './BestFrameSelector.js';
 import { VisualEmbeddingAdapter } from './VisualEmbeddingAdapter.js';
 import { ANNIndex } from './ANNIndex.js';
 import { OCRAdapter } from './OCRAdapter.js';
+import { OCRConsensus } from './OCRConsensus.js';
 import { BarcodeAdapter } from './BarcodeAdapter.js';
 import { EvidenceFusion } from './EvidenceFusion.js';
 import { TemporalConsensus } from './TemporalConsensus.js';
@@ -148,6 +149,12 @@ export class LensRuntime {
         switchVotes: this.policy.temporalSwitchVotes,
       }),
       visualCandidates: [], visualEvidence: null, ocrEvidence: null,
+      ocrConsensus: new OCRConsensus({
+        requiredExactVotes: this.policy.ocrExactVotes,
+        requiredNameVotes: this.policy.ocrNameVotes,
+        maxObservations: this.policy.ocrMaxObservations,
+      }),
+      ocrEpoch: 0,
       lastVisualAt: 0, lastOcrAt: 0, visualInFlight: false, ocrInFlight: false,
       locked: null,
       changeDetector: new ChangeDetector({
@@ -179,9 +186,10 @@ export class LensRuntime {
       const previousVisualCandidateId = c.visualEvidence?.candidateId || null;
       c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, quality: frame.quality.score };
       const temporal = c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
-      if (previousVisualCandidateId && previousVisualCandidateId !== top.id) {
-        c.ocrEvidence = null;
-        c.lastOcrAt = 0;
+      if (c.ocrEpoch !== temporal.epoch) {
+        this._resetOcrEvidence(c, { reason: 'temporal_epoch_changed', temporalEpoch: temporal.epoch });
+      } else if (previousVisualCandidateId && previousVisualCandidateId !== top.id) {
+        this._resetOcrEvidence(c, { reason: 'visual_candidate_changed', temporalEpoch: temporal.epoch });
         this.telemetry.emit('IDENTITY_VISUAL_CHANGED', {
           from: previousVisualCandidateId,
           to: top.id,
@@ -225,14 +233,35 @@ export class LensRuntime {
         });
         return;
       }
-      c.ocrEvidence = evidence;
-      this.telemetry.emit('OCR_RESULT', { candidateId: evidence.candidateId, collectorExact: evidence.collectorExact, contradiction: evidence.contradiction, available: evidence.available });
+      const consensusEvidence = c.ocrConsensus.observe(evidence, token.candidateId);
+      c.ocrEvidence = consensusEvidence;
+      this.telemetry.emit('OCR_RESULT', {
+        rawCandidateId: evidence.candidateId,
+        rawCollectorExact: evidence.collectorExact,
+        rawContradiction: evidence.contradiction,
+        candidateId: consensusEvidence.candidateId,
+        collectorExact: consensusEvidence.collectorExact,
+        exactVotes: consensusEvidence.exactVotes,
+        nameVotes: consensusEvidence.nameVotes,
+        observations: consensusEvidence.observations,
+        contradiction: consensusEvidence.contradiction,
+        available: consensusEvidence.available,
+      });
       this._evaluateEvidence();
     } catch (error) {
       this.telemetry.emit('OCR_ERROR', { message: error.message });
     } finally {
       if (this.context === c) c.ocrInFlight = false;
     }
+  }
+
+  _resetOcrEvidence(c, { reason, temporalEpoch = 0 } = {}) {
+    if (!c) return;
+    c.ocrEvidence = null;
+    c.ocrConsensus?.reset();
+    c.ocrEpoch = temporalEpoch;
+    c.lastOcrAt = 0;
+    this.telemetry.emit('OCR_CONSENSUS_RESET', { reason, temporalEpoch });
   }
 
   _evaluateEvidence() {
