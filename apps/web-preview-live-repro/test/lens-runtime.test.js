@@ -9,6 +9,7 @@ import { LENS_STATES } from '../lens/config.js';
 import { TrackManager } from '../lens/TrackManager.js';
 import { createIdentityToken, isIdentityTokenCurrent, createTrackToken, isTrackTokenCurrent } from '../lens/IdentityGuard.js';
 import { ChangeDetector } from '../lens/ChangeDetector.js';
+import { validateCardQuad } from '../lens/QuadQuality.js';
 
 function temporal(candidateId, votes, score = 0.97, margin = 0.10, quality = 0.7) {
   const c = new TemporalConsensus();
@@ -237,4 +238,45 @@ test('runtime source contains no synthetic transition recovery path', () => {
   const source = fs.readFileSync(path.resolve(import.meta.dirname, '../lens/LensRuntime.js'), 'utf8');
   assert.equal(source.includes('transition_recovery'), false);
   assert.equal(source.includes("stateMachine.transition(LENS_STATES.TRACKING, detail)"), false);
+});
+
+
+test('low average frame quality blocks OCR-supported lock', () => {
+  const fusion = new EvidenceFusion();
+  const result = fusion.evaluate({
+    temporal: temporal('a', 5, 0.99, 0.12, 0.30),
+    visual: visual('a', 0.99, 0.12),
+    ocr: { candidateId: 'a', collectorExact: true, strongNameMatch: true, contradiction: false },
+    canonical: { conflict: false },
+  });
+  assert.equal(result.decision, 'CONTINUE');
+  assert.equal(result.reason, 'frame_quality_insufficient_for_lock');
+});
+
+test('low average frame quality blocks extreme visual-only lock', () => {
+  const fusion = new EvidenceFusion();
+  const result = fusion.evaluate({ temporal: temporal('a', 7, 0.99, 0.12, 0.50), visual: visual('a', 0.99, 0.12), canonical: { conflict: false } });
+  assert.equal(result.decision, 'CONTINUE');
+  assert.equal(result.reason, 'frame_quality_insufficient_for_visual_only_lock');
+});
+
+test('quad quality accepts a plausible perspective card and rejects degenerate geometry', () => {
+  const valid = validateCardQuad([{ x: 120, y: 70 }, { x: 420, y: 90 }, { x: 390, y: 520 }, { x: 100, y: 500 }], 640, 640);
+  assert.equal(valid.valid, true);
+  assert.ok(valid.score > 0.4);
+  const bowTie = validateCardQuad([{ x: 100, y: 100 }, { x: 400, y: 500 }, { x: 400, y: 100 }, { x: 100, y: 500 }], 640, 640);
+  assert.equal(bowTie.valid, false);
+  assert.equal(bowTie.reason, 'non_convex_or_self_intersecting');
+  const tiny = validateCardQuad([{ x: 100, y: 100 }, { x: 130, y: 100 }, { x: 130, y: 142 }, { x: 100, y: 142 }], 640, 640);
+  assert.equal(tiny.valid, false);
+  assert.equal(tiny.reason, 'quad_too_small');
+});
+
+test('quad quality rejects implausible aspect and major out-of-frame corners', () => {
+  const wide = validateCardQuad([{ x: 80, y: 100 }, { x: 500, y: 100 }, { x: 500, y: 340 }, { x: 80, y: 340 }], 640, 640);
+  assert.equal(wide.valid, false);
+  assert.equal(wide.reason, 'implausible_card_aspect');
+  const outside = validateCardQuad([{ x: -80, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 560 }, { x: -80, y: 560 }], 640, 640);
+  assert.equal(outside.valid, false);
+  assert.equal(outside.reason, 'quad_out_of_bounds');
 });

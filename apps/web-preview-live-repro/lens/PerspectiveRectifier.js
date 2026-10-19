@@ -1,4 +1,5 @@
 import { DEFAULT_POLICY } from './config.js';
+import { validateCardQuad } from './QuadQuality.js';
 
 function solveLinear(A, b) {
   const n = b.length;
@@ -39,10 +40,16 @@ export class PerspectiveRectifier {
     this.width = width;
     this.height = Math.round(width / aspect);
     this.source = document.createElement('canvas');
+    this.lastValidation = null;
   }
 
   rectify(video, quad) {
-    if (!video?.videoWidth || !quad || quad.length !== 4) return null;
+    if (!video?.videoWidth || !video?.videoHeight) {
+      this.lastValidation = { valid: false, score: 0, reason: 'missing_video_dimensions' };
+      return null;
+    }
+    this.lastValidation = validateCardQuad(quad, video.videoWidth, video.videoHeight);
+    if (!this.lastValidation.valid) return null;
     const src = this.source;
     src.width = video.videoWidth; src.height = video.videoHeight;
     const sctx = src.getContext('2d', { willReadFrequently: true });
@@ -53,13 +60,29 @@ export class PerspectiveRectifier {
     const output = octx.createImageData(out.width, out.height);
     const dstQuad = [{ x: 0, y: 0 }, { x: out.width - 1, y: 0 }, { x: out.width - 1, y: out.height - 1 }, { x: 0, y: out.height - 1 }];
     const H = homography(dstQuad, quad); // destination -> source
-    if (!H) return null;
+    if (!H || H.some(v => !Number.isFinite(v))) {
+      this.lastValidation = { ...this.lastValidation, valid: false, score: 0, reason: 'unstable_homography' };
+      return null;
+    }
     const sw = src.width, sh = src.height, sd = sourceData.data, od = output.data;
+    const sample = (x, y, channel) => {
+      const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(sw - 1, x0 + 1), y1 = Math.min(sh - 1, y0 + 1);
+      const fx = x - x0, fy = y - y0;
+      const i00 = (y0 * sw + x0) * 4 + channel, i10 = (y0 * sw + x1) * 4 + channel;
+      const i01 = (y1 * sw + x0) * 4 + channel, i11 = (y1 * sw + x1) * 4 + channel;
+      const top = sd[i00] * (1 - fx) + sd[i10] * fx;
+      const bottom = sd[i01] * (1 - fx) + sd[i11] * fx;
+      return top * (1 - fy) + bottom * fy;
+    };
     for (let y = 0; y < out.height; y++) for (let x = 0; x < out.width; x++) {
       const p = applyH(H, x, y);
-      const sx = Math.max(0, Math.min(sw - 1, Math.round(p.x))), sy = Math.max(0, Math.min(sh - 1, Math.round(p.y)));
-      const si = (sy * sw + sx) * 4, di = (y * out.width + x) * 4;
-      od[di] = sd[si]; od[di + 1] = sd[si + 1]; od[di + 2] = sd[si + 2]; od[di + 3] = 255;
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+        this.lastValidation = { ...this.lastValidation, valid: false, score: 0, reason: 'non_finite_projection' };
+        return null;
+      }
+      const sx = Math.max(0, Math.min(sw - 1, p.x)), sy = Math.max(0, Math.min(sh - 1, p.y));
+      const di = (y * out.width + x) * 4;
+      od[di] = sample(sx, sy, 0); od[di + 1] = sample(sx, sy, 1); od[di + 2] = sample(sx, sy, 2); od[di + 3] = 255;
     }
     octx.putImageData(output, 0, 0);
     return out;

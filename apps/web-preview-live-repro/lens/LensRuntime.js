@@ -90,8 +90,8 @@ export class LensRuntime {
     const tr = this.tracker.track;
     if (!tr?.stable) return { ok: false, reason: 'no_stable_track' };
     const rectified = this.rectifier.rectify(this.video, tr.quad);
-    if (!rectified) return { ok: false, reason: 'rectification_failed' };
-    const quality = this.quality.score(rectified);
+    if (!rectified) return { ok: false, reason: this.rectifier.lastValidation?.reason || 'rectification_failed' };
+    const quality = { ...this.quality.score(rectified), geometry: this.rectifier.lastValidation?.score ?? 0 };
     await this._launchVisual(tr, { canvas: rectified, quality, generation: tr.generation, at: performance.now() }, true);
     return { ok: true };
   }
@@ -128,8 +128,8 @@ export class LensRuntime {
 
     if (this.stateMachine.state === LENS_STATES.TRACKING || this.stateMachine.state === LENS_STATES.UNKNOWN || this.stateMachine.state === LENS_STATES.AMBIGUOUS) this._safeTransition(LENS_STATES.ANALYZING, { generation: track.generation });
     const rectified = this.rectifier.rectify(this.video, track.quad);
-    if (!rectified) { this.telemetry.emit('RECTIFY_FAIL'); return; }
-    const quality = this.quality.score(rectified);
+    if (!rectified) { this.telemetry.emit('RECTIFY_FAIL', this.rectifier.lastValidation || {}); return; }
+    const quality = { ...this.quality.score(rectified), geometry: this.rectifier.lastValidation?.score ?? 0 };
     this.context.lastQuality = quality;
     const accepted = this.bestFrame.consider({ canvas: rectified, quality, generation: track.generation, at });
     const locked = Boolean(this.context.locked);

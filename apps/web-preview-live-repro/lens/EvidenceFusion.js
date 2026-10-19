@@ -27,6 +27,7 @@ export class EvidenceFusion {
     const marginOk = top.avgMargin >= p.lockVisualMargin;
     const scoreOk = top.avgScore >= p.lockVisualScore && visual.embeddingVerified === true;
     const votesOk = top.votes >= p.minTemporalVotes;
+    const qualityOk = top.avgQuality >= p.lockMinAverageQuality;
     const candidateId = top.candidateId;
 
     const ocrContradiction = Boolean(
@@ -44,15 +45,27 @@ export class EvidenceFusion {
     const ocrSupports = Boolean(
       ocr?.candidateId === candidateId && (ocr.collectorExact || ocr.strongNameMatch) && !ocr.contradiction
     );
-    if (votesOk && scoreOk && marginOk && ocrSupports) {
+    if (votesOk && scoreOk && marginOk && !qualityOk) {
+      return { decision: 'CONTINUE', candidateId, confidence: 0, reason: 'frame_quality_insufficient_for_lock' };
+    }
+
+    if (votesOk && scoreOk && marginOk && qualityOk && ocrSupports) {
       const confidence = Math.min(0.995, 0.72 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.012);
       return { decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_ocr' };
     }
 
-    const visualOnlyExtreme = visual.embeddingVerified === true && top.votes >= p.visualOnlyVotes && top.avgScore >= p.visualOnlyScore && top.avgMargin >= p.visualOnlyMargin;
+    const visualOnlyExtreme = visual.embeddingVerified === true
+      && top.votes >= p.visualOnlyVotes
+      && top.avgScore >= p.visualOnlyScore
+      && top.avgMargin >= p.visualOnlyMargin
+      && top.avgQuality >= p.visualOnlyMinAverageQuality;
     if (visualOnlyExtreme && !ocr?.contradiction) {
       const confidence = Math.min(0.985, 0.78 + top.avgScore * 0.12 + top.avgMargin * 0.45 + Math.min(top.votes, 7) * 0.009);
       return { decision: 'LOCK', candidateId, confidence, reason: 'extreme_temporal_visual_consensus' };
+    }
+
+    if (top.votes >= p.visualOnlyVotes && top.avgScore >= p.visualOnlyScore && top.avgMargin >= p.visualOnlyMargin && top.avgQuality < p.visualOnlyMinAverageQuality) {
+      return { decision: 'CONTINUE', candidateId, confidence: 0, reason: 'frame_quality_insufficient_for_visual_only_lock' };
     }
 
     if (visual.score >= p.provisionalVisualScore) {
