@@ -16,6 +16,7 @@ import { CanonicalResolver } from './CanonicalResolver.js';
 import { LensStateMachine } from './LensStateMachine.js';
 import { MarketOverlay } from './MarketOverlay.js';
 import { Telemetry } from './Telemetry.js';
+import { createTrackToken, isTrackTokenCurrent, createIdentityToken, isIdentityTokenCurrent } from './IdentityGuard.js';
 
 export class LensRuntime {
   constructor({ video, trackLayer, resultOverlay, statusPill, debugNode = null, policy = {} }) {
@@ -137,7 +138,11 @@ export class LensRuntime {
   _newContext(track) {
     this.context = {
       generation: track.generation,
-      consensus: new TemporalConsensus(),
+      consensus: new TemporalConsensus({
+        strongSwitchScore: this.policy.temporalSwitchScore,
+        strongSwitchMargin: this.policy.temporalSwitchMargin,
+        switchVotes: this.policy.temporalSwitchVotes,
+      }),
       visualCandidates: [], visualEvidence: null, ocrEvidence: null,
       lastVisualAt: 0, lastOcrAt: 0, visualInFlight: false, ocrInFlight: false,
       locked: null, changeCandidate: null, changeVotes: 0, lastQuality: null,
@@ -160,9 +165,24 @@ export class LensRuntime {
       }
       const top = candidates[0], second = candidates[1];
       const margin = top.score - (second?.score ?? 0);
+      const previousVisualCandidateId = c.visualEvidence?.candidateId || null;
       c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, quality: frame.quality.score };
-      c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
-      this.telemetry.emit('VISUAL_TOPK', { id: top.id, score: top.score, margin, verified: top.embeddingVerified, candidates: candidates.length });
+      const temporal = c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
+      if (previousVisualCandidateId && previousVisualCandidateId !== top.id) {
+        c.ocrEvidence = null;
+        c.lastOcrAt = 0;
+        this.telemetry.emit('IDENTITY_VISUAL_CHANGED', {
+          from: previousVisualCandidateId,
+          to: top.id,
+          temporalAction: temporal.lastAction,
+          temporalEpoch: temporal.epoch,
+        });
+      }
+      this.telemetry.emit('VISUAL_TOPK', {
+        id: top.id, score: top.score, margin, verified: top.embeddingVerified, candidates: candidates.length,
+        temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction,
+        temporalPending: temporal.pendingSwitch, temporalEpoch: temporal.epoch,
+      });
       if (c.locked) { this._observePossibleChange(top, margin); return; }
       this._safeTransition(LENS_STATES.VERIFYING, { candidateId: top.id });
       this._evaluateEvidence();
@@ -174,18 +194,35 @@ export class LensRuntime {
 
   async _launchOcr(track, canvas) {
     const c = this.context; if (!c || c.ocrInFlight || c.generation !== track.generation || c.locked) return;
+    const token = this._identityToken();
+    if (!token.candidateId || token.temporalCandidateId !== token.candidateId) {
+      this.telemetry.emit('OCR_SKIPPED_IDENTITY_UNSTABLE', {
+        visualCandidateId: token.candidateId,
+        temporalCandidateId: token.temporalCandidateId,
+        temporalEpoch: token.temporalEpoch,
+      });
+      return;
+    }
     c.ocrInFlight = true; c.lastOcrAt = performance.now();
-    const token = c.generation;
     try {
-      this.telemetry.emit('OCR_START');
+      this.telemetry.emit('OCR_START', token);
       const evidence = await this.ocr.analyze(canvas, this.lang, c.visualCandidates);
-      if (!this._isCurrent(token)) return;
+      if (!this._isIdentityTokenCurrent(token)) {
+        this.telemetry.emit('OCR_STALE_DISCARDED', {
+          launchedFor: token,
+          current: this._identityToken(),
+          returnedCandidateId: evidence?.candidateId || null,
+        });
+        return;
+      }
       c.ocrEvidence = evidence;
       this.telemetry.emit('OCR_RESULT', { candidateId: evidence.candidateId, collectorExact: evidence.collectorExact, contradiction: evidence.contradiction, available: evidence.available });
       this._evaluateEvidence();
     } catch (error) {
       this.telemetry.emit('OCR_ERROR', { message: error.message });
-    } finally { if (this._isCurrent(token)) c.ocrInFlight = false; }
+    } finally {
+      if (this.context === c) c.ocrInFlight = false;
+    }
   }
 
   _evaluateEvidence() {
@@ -230,8 +267,13 @@ export class LensRuntime {
   _maybeBarcode(at) {
     if (this.barcodeInFlight || at - this.lastBarcodeAt < this.policy.barcodeIntervalMs) return;
     this.lastBarcodeAt = at; this.barcodeInFlight = true;
+    const token = this._trackToken();
     this.barcode.detect(this.video).then(result => {
       if (!result) return;
+      if (!this._isTrackTokenCurrent(token)) {
+        this.telemetry.emit('BARCODE_STALE_DISCARDED', { launchedFor: token, current: this._trackToken(), code: result.code });
+        return;
+      }
       this.telemetry.emit('BARCODE', { code: result.code, verified: result.verified });
       if (result.verified && result.match && this.context && !this.context.locked) {
         const c = this.context; c.locked = { id: result.candidateId, confidence: 0.995 };
@@ -284,6 +326,18 @@ export class LensRuntime {
   }
 
   _isCurrent(generation) { return this.running && this.context?.generation === generation && this.tracker.track?.generation === generation; }
+
+  _trackToken() { return createTrackToken(this.context, this.tracker.track); }
+
+  _isTrackTokenCurrent(token) {
+    return isTrackTokenCurrent({ running: this.running, context: this.context, track: this.tracker.track }, token);
+  }
+
+  _identityToken() { return createIdentityToken(this.context, this.tracker.track); }
+
+  _isIdentityTokenCurrent(token) {
+    return isIdentityTokenCurrent({ running: this.running, context: this.context, track: this.tracker.track }, token);
+  }
 
   _warmIndex() {
     if (!this.running) return;

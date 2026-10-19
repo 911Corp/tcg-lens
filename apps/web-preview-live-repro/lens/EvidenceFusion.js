@@ -14,6 +14,15 @@ export class EvidenceFusion {
     }
 
     const top = temporal.top;
+    if (top.candidateId !== visual.candidateId) {
+      return {
+        decision: 'CONTINUE',
+        candidateId: visual.candidateId,
+        confidence: 0,
+        reason: 'temporal_visual_mismatch',
+      };
+    }
+
     const p = this.policy;
     const marginOk = top.avgMargin >= p.lockVisualMargin;
     const scoreOk = top.avgScore >= p.lockVisualScore && visual.embeddingVerified === true;

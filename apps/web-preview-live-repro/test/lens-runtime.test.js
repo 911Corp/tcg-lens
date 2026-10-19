@@ -7,6 +7,7 @@ import { TemporalConsensus } from '../lens/TemporalConsensus.js';
 import { EvidenceFusion } from '../lens/EvidenceFusion.js';
 import { LENS_STATES } from '../lens/config.js';
 import { TrackManager } from '../lens/TrackManager.js';
+import { createIdentityToken, isIdentityTokenCurrent, createTrackToken, isTrackTokenCurrent } from '../lens/IdentityGuard.js';
 
 function temporal(candidateId, votes, score = 0.97, margin = 0.10, quality = 0.7) {
   const c = new TemporalConsensus();
@@ -95,4 +96,102 @@ test('camera-first HTML contains no manual identify UI or fake phone chrome', ()
   assert.equal(html.includes('reticle'), false);
   assert.equal(html.includes('mock-card'), false);
   assert.match(html, /type="module" src="\/lens\/index\.js"/);
+});
+
+
+test('temporal consensus isolates a new candidate instead of mixing identities', () => {
+  const c = new TemporalConsensus({ switchVotes: 2, strongSwitchScore: 0.94, strongSwitchMargin: 0.06 });
+  c.observe({ candidateId: 'b', score: 0.98, margin: 0.11, quality: 0.8 });
+  c.observe({ candidateId: 'b', score: 0.98, margin: 0.11, quality: 0.8 });
+  const pending = c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  assert.equal(pending.top.candidateId, 'b');
+  assert.equal(pending.top.votes, 2);
+  assert.deepEqual(pending.pendingSwitch, { candidateId: 'a', votes: 1 });
+  assert.equal(pending.ranked.some(x => x.candidateId === 'a'), false);
+});
+
+test('temporal consensus switches only after consecutive strong observations and resets the active window', () => {
+  const c = new TemporalConsensus({ switchVotes: 2, strongSwitchScore: 0.94, strongSwitchMargin: 0.06 });
+  for (let i = 0; i < 5; i++) c.observe({ candidateId: 'b', score: 0.98, margin: 0.11, quality: 0.8 });
+  c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  const switched = c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  assert.equal(switched.top.candidateId, 'a');
+  assert.equal(switched.top.votes, 2);
+  assert.equal(switched.total, 2);
+  assert.equal(switched.epoch, 1);
+  assert.equal(switched.lastAction, 'SWITCH_ACCEPTED');
+  assert.equal(switched.ranked.some(x => x.candidateId === 'b'), false);
+});
+
+test('a weak one-frame mismatch cannot replace the active temporal identity', () => {
+  const c = new TemporalConsensus({ switchVotes: 2, strongSwitchScore: 0.94, strongSwitchMargin: 0.06 });
+  c.observe({ candidateId: 'a', score: 0.98, margin: 0.11, quality: 0.8 });
+  const result = c.observe({ candidateId: 'b', score: 0.91, margin: 0.04, quality: 0.8 });
+  assert.equal(result.top.candidateId, 'a');
+  assert.equal(result.pendingSwitch, null);
+  assert.equal(result.lastAction, 'MISMATCH_REJECTED');
+});
+
+test('visual and temporal identities must agree before VERIFY or LOCK is possible', () => {
+  const fusion = new EvidenceFusion();
+  const result = fusion.evaluate({
+    temporal: temporal('b', 6, 0.99, 0.12),
+    visual: visual('a', 0.99, 0.12),
+    ocr: { candidateId: 'b', collectorExact: true, strongNameMatch: true, contradiction: false },
+    canonical: { conflict: false },
+  });
+  assert.equal(result.decision, 'CONTINUE');
+  assert.equal(result.candidateId, 'a');
+  assert.equal(result.reason, 'temporal_visual_mismatch');
+});
+
+test('switching back A after B starts a clean A temporal epoch', () => {
+  const c = new TemporalConsensus({ switchVotes: 2, strongSwitchScore: 0.94, strongSwitchMargin: 0.06 });
+  c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  c.observe({ candidateId: 'b', score: 0.99, margin: 0.12, quality: 0.8 });
+  c.observe({ candidateId: 'b', score: 0.99, margin: 0.12, quality: 0.8 });
+  c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  const final = c.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  assert.equal(final.top.candidateId, 'a');
+  assert.equal(final.top.votes, 2);
+  assert.equal(final.epoch, 2);
+  assert.equal(final.ranked.length, 1);
+});
+
+
+test('identity token rejects OCR evidence after visual identity changes inside the same track generation', () => {
+  const consensus = new TemporalConsensus({ switchVotes: 2 });
+  consensus.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  const track = { id: 7, generation: 3 };
+  const context = { generation: 3, visualEvidence: { candidateId: 'a' }, consensus };
+  const token = createIdentityToken(context, track);
+  assert.equal(isIdentityTokenCurrent({ running: true, context, track }, token), true);
+  context.visualEvidence = { candidateId: 'b' };
+  assert.equal(isIdentityTokenCurrent({ running: true, context, track }, token), false);
+});
+
+test('identity token rejects OCR evidence after temporal epoch changes even if candidate id cycles back', () => {
+  const consensus = new TemporalConsensus({ switchVotes: 2 });
+  consensus.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  const track = { id: 9, generation: 4 };
+  const context = { generation: 4, visualEvidence: { candidateId: 'a' }, consensus };
+  const token = createIdentityToken(context, track);
+  consensus.observe({ candidateId: 'b', score: 0.99, margin: 0.12, quality: 0.8 });
+  consensus.observe({ candidateId: 'b', score: 0.99, margin: 0.12, quality: 0.8 });
+  consensus.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  consensus.observe({ candidateId: 'a', score: 0.99, margin: 0.12, quality: 0.8 });
+  context.visualEvidence = { candidateId: 'a' };
+  assert.equal(consensus.summary().epoch, 2);
+  assert.equal(isIdentityTokenCurrent({ running: true, context, track }, token), false);
+});
+
+test('track token rejects delayed barcode result after a new generation or track', () => {
+  const context = { generation: 5 };
+  const track = { id: 10, generation: 5 };
+  const token = createTrackToken(context, track);
+  assert.equal(isTrackTokenCurrent({ running: true, context, track }, token), true);
+  const replacementContext = { generation: 6 };
+  const replacementTrack = { id: 11, generation: 6 };
+  assert.equal(isTrackTokenCurrent({ running: true, context: replacementContext, track: replacementTrack }, token), false);
 });
