@@ -69,16 +69,16 @@ The UI must expose the state machine rather than silently waiting on libraries.
 1. `npm run validate:local` remains green.
 2. New runtime unit tests exist and pass.
 3. A browser E2E test proves camera-start -> frame-ready -> analysis-triggered.
-4. Manual Analyze always captures a frame or returns a visible reason why it cannot.
+4. After camera permission, scan progression is automatic and does not require an Analyze button.
 5. No heavy ML dependency is required for basic scan feedback.
 6. The preview shows a diagnostic state within 1 second after camera permission is granted.
 7. Deployment is done only after local/E2E tests pass.
 
 ## Later work
 Once the runtime is stable:
-1. restore multi-card detection/tracking
-2. restore local visual embeddings/index
-3. calibrate similarity thresholds on a real card dataset
-4. add OCR-assisted disambiguation for FR/EN/JP shared artwork
-5. add sealed packaging visual recognition + barcode fusion
-6. move the validated pipeline into the native iOS and Android shells
+1. calibrate single-card similarity and margin thresholds on a real card dataset
+2. prove automatic card-change unlock/relock on physical devices
+3. move the validated single-card pipeline into the native iOS and Android shells
+4. only then restore multi-card detection/tracking
+5. expand the local ANN/index and dedicated TCG embedding model
+6. add sealed packaging visual recognition + barcode fusion

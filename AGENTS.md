@@ -40,14 +40,14 @@ This reproduction includes the latest local continuous Lens/embedding experiment
 3. Prove a frame can be copied from `<video>` to canvas on iOS Safari and Android Chrome.
 4. Make the UI visibly expose runtime state: CAMERA, FRAME, DETECT, TRACK, EMBED, OCR, BARCODE, RESOLVE, ERROR.
 5. Add a reproducible test harness using prerecorded card footage or a deterministic synthetic MediaStream where practical.
-6. Ensure expensive dependencies (OpenCV, Tesseract, TensorFlow/MobileNet) cannot block basic scan feedback.
-7. Only after the minimal pipeline reacts reliably, re-enable multi-card tracking and visual embeddings.
+6. Ensure expensive dependencies (OCR and embedding models) cannot block camera/detection/tracking feedback.
+7. Keep the milestone single-card until detection, rectification, visual matching, temporal locking and card-change detection are proven on-device.
 
 ## Required scan behavior
 - Opening Lens must show an explicit camera/runtime state within 1 second after permission is granted.
 - With one card centered, the UI must visibly progress through detection/analysis states even if identity fails.
 - Failure must produce a visible actionable error, never silent inactivity.
-- The manual Analyze button must always force a frame capture and return either candidates or a diagnostic reason.
+- Once camera permission is granted, recognition must run automatically; the normal Lens UI must not expose an Identify/Analyze button.
 - Barcode detection must remain independent from OCR/embedding failures.
 - Visual recognition may propose candidates, but exact identity should be confirmed by temporal consistency and/or OCR/barcode when needed.
 
@@ -71,7 +71,7 @@ For browser E2E, include at least:
 - ML dependency unavailable path
 - OCR unavailable path
 - barcode unsupported path
-- manual analyze path
+- automatic camera -> frame -> detection -> analysis path
 - a deterministic candidate result path
 
 ## Do not fake functionality

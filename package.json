@@ -22,7 +22,8 @@
     "test:sealed": "rm -rf .tmp-sealed-test && tsc -p tsconfig.sealed-test.json && node --test .tmp-sealed-test/packages/ingestion/test/sealed-barcode.test.js",
     "test:sealed:integration": "npm run test:sealed-integration -w @tcglens/ingestion-worker",
     "preview:web": "node apps/web-preview/server.mjs",
-    "validate:local": "bash scripts/validate-local.sh"
+    "validate:local": "bash scripts/validate-local.sh",
+    "test:lens": "node --test apps/web-preview-live-repro/test/lens-runtime.test.js"
   },
   "type": "module"
 }

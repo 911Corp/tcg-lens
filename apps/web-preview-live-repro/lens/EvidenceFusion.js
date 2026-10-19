@@ -1,0 +1,54 @@
+import { DEFAULT_POLICY } from './config.js';
+
+export class EvidenceFusion {
+  constructor(policy = {}) {
+    this.policy = { ...DEFAULT_POLICY, ...policy };
+  }
+
+  evaluate({ temporal, visual, ocr = null, barcode = null, canonical = null }) {
+    if (barcode?.verified && barcode.candidateId) {
+      return { decision: 'LOCK', candidateId: barcode.candidateId, confidence: 0.995, reason: 'verified_barcode' };
+    }
+    if (!temporal?.top || !visual?.candidateId) {
+      return { decision: 'CONTINUE', confidence: 0, reason: 'insufficient_visual_evidence' };
+    }
+
+    const top = temporal.top;
+    const p = this.policy;
+    const marginOk = top.avgMargin >= p.lockVisualMargin;
+    const scoreOk = top.avgScore >= p.lockVisualScore && visual.embeddingVerified === true;
+    const votesOk = top.votes >= p.minTemporalVotes;
+    const candidateId = top.candidateId;
+
+    const ocrContradiction = Boolean(
+      ocr?.candidateId && ocr.candidateId !== candidateId && (ocr.collectorExact || ocr.strongNameMatch)
+    );
+    const canonicalContradiction = Boolean(canonical?.conflict);
+    if (ocrContradiction || canonicalContradiction) {
+      return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: ocrContradiction ? 'ocr_contradiction' : 'canonical_conflict' };
+    }
+
+    if (!marginOk && top.votes >= p.minTemporalVotes) {
+      return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: 'top1_top2_margin_too_small' };
+    }
+
+    const ocrSupports = Boolean(
+      ocr?.candidateId === candidateId && (ocr.collectorExact || ocr.strongNameMatch) && !ocr.contradiction
+    );
+    if (votesOk && scoreOk && marginOk && ocrSupports) {
+      const confidence = Math.min(0.995, 0.72 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.012);
+      return { decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_ocr' };
+    }
+
+    const visualOnlyExtreme = visual.embeddingVerified === true && top.votes >= p.visualOnlyVotes && top.avgScore >= p.visualOnlyScore && top.avgMargin >= p.visualOnlyMargin;
+    if (visualOnlyExtreme && !ocr?.contradiction) {
+      const confidence = Math.min(0.985, 0.78 + top.avgScore * 0.12 + top.avgMargin * 0.45 + Math.min(top.votes, 7) * 0.009);
+      return { decision: 'LOCK', candidateId, confidence, reason: 'extreme_temporal_visual_consensus' };
+    }
+
+    if (visual.score >= p.provisionalVisualScore) {
+      return { decision: 'VERIFY', candidateId, confidence: Math.min(0.89, visual.score * 0.86), reason: 'visual_candidate_needs_corroboration' };
+    }
+    return { decision: 'CONTINUE', candidateId: null, confidence: 0, reason: 'visual_below_threshold' };
+  }
+}
