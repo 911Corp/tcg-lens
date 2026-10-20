@@ -238,3 +238,11 @@ test('background warming indexes every pool item of a page (no silent skips)', a
     assert.ok([...index.refs.values()].every(r => r.deep === null), 'deep computed lazily at query time');
   } finally { globalThis.fetch = originalFetch; }
 });
+
+import { corroborateCandidate as corroborateV036 } from '../lens/MetadataCorroboration.js';
+test('Classic Collection reprints are corroborated by the number printed on the card, not the catalogue numbering', () => {
+  const charizard = { localId: '001', printedTotal: 0, printedNumber: '4/102', setAbbreviation: null };
+  const ok = corroborateV036(charizard, { number: '4', printedTotal: 102 });
+  assert.equal(ok.printingSupport, true); assert.equal(ok.contradicts, false);
+  assert.equal(corroborateV036(charizard, { number: '1', printedTotal: 30 }).contradicts, true, 'catalogue numbering is not what is printed');
+});

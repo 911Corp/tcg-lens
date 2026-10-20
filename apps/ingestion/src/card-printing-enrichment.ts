@@ -1,3 +1,4 @@
+import { tcgplayerComparableName } from '../../../packages/ingestion/src/index.js';
 import { createHash } from 'node:crypto';
 import {
   collectorNumberMatchKeyV1,
@@ -87,7 +88,8 @@ export async function enrichTcgcsvPrinting(db: SqlClient, input: {
     const mapped = (await candidatesByEntityIds(db, [ext.rows[0].entity_id]))[0];
     if (!mapped || mapped.language_code !== input.product.languageCode ||
         collectorNumberMatchKeyV1(mapped.collector_number_normalized) !== collectorNumberMatchKeyV1(input.product.collectorNumberNormalized) ||
-        normalizeTextV1(mapped.name) !== input.product.normalizedName) {
+        (normalizeTextV1(mapped.name) !== input.product.normalizedName
+          && tcgplayerComparableName(mapped.name, mapped.collector_number_normalized) !== tcgplayerComparableName(input.product.normalizedName, input.product.collectorNumberNormalized))) {
       await recordConflict(db, input.sourceRecordId, [ext.rows[0].entity_id], 'EXTERNAL_ID_COLLISION', {
         source: 'tcgplayer', productId: input.product.productId, incomingName: input.product.name,
         incomingNumber: input.product.collectorNumberNormalized, incomingLanguage: input.product.languageCode

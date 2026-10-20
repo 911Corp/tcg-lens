@@ -99,8 +99,8 @@ export class ANNIndex {
     return top;
   }
 
-  async query(canvas, lang, embedding, k = 6) {
-    if (this.usesDeep(lang)) return this._queryDeep(canvas, lang, embedding, k);
+  async query(canvas, lang, embedding, k = 6, opts = {}) {
+    if (this.usesDeep(lang)) return this._queryDeep(canvas, lang, embedding, k, opts);
     if (this.usesPrecomputed(lang)) return this._queryPrecomputed(canvas, lang, embedding, k);
     if (!this.count(lang)) return [];
     const fastVector = embedding.fastDescriptor(canvas);
@@ -164,11 +164,18 @@ export class ANNIndex {
    * v0.3.5 instant path: one model pass on the crop, learned-whitening projection, scores against
    * every reference. Candidates carry their artwork twins and the margin to the best non-twin.
    */
-  async _queryDeep(canvas, lang, embedding, k) {
+  async _queryDeep(canvas, lang, embedding, k, { track = null } = {}) {
     const langs = scopeLangs(lang);
     const deep = await embedding.embed(canvas);
     if (!deep) return [];
-    const q = this.deep.project(deep, embedding.fastDescriptor(canvas));
+    const q1 = this.deep.project(deep, embedding.fastDescriptor(canvas));
+    // Average the last frames of the same track: glare and holo sheen move between frames.
+    if (!track || this.qTrack !== track) { this.qTrack = track; this.qWindow = []; }
+    this.qWindow.push(q1); if (this.qWindow.length > (this.queryWindow ?? 3)) this.qWindow.shift();
+    const q = new Float32Array(q1.length);
+    for (const v of this.qWindow) for (let d = 0; d < q.length; d++) q[d] += v[d];
+    let nq = 0; for (let d = 0; d < q.length; d++) nq += q[d] * q[d]; nq = Math.sqrt(nq) || 1;
+    for (let d = 0; d < q.length; d++) q[d] /= nq;
     const hits = this.deep.search(q, langs, 30);
     if (!hits.length) return [];
     const top = hits[0];
@@ -183,6 +190,13 @@ export class ANNIndex {
     out[0].marginNonTwin = top.score - (nonTwin?.score ?? 0);
     // Scores of the twins (they are near the top) for language-based twin resolution.
     out[0].twinScores = Object.fromEntries(hits.filter(h => twinIds.has(h.id)).map(h => [h.id, h.score]));
+    // Visual script evidence: gap between the top family and its best twin of the other script
+    // (Japanese vs Latin printings of the same artwork).
+    const scriptOf = ls => (ls.includes('ja') ? 'ja' : 'latin');
+    const topScript = scriptOf(top.languages);
+    const otherScript = hits.filter(h => twinIds.has(h.id) && scriptOf(h.languages) !== topScript);
+    out[0].script = topScript;
+    out[0].scriptGap = otherScript.length ? top.score - Math.max(...otherScript.map(h => h.score)) : null;
     return out;
   }
 

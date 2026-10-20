@@ -51,6 +51,13 @@ function compare(observed, expected, equals = (a, b) => a === b) {
  * `candidate`: { localId, printedTotal, setAbbreviation, lang }.
  */
 export function corroborateCandidate(candidate, parsed, { observedLanguage = null } = {}) {
+  // v0.3.6: some printings print a number different from the catalogue numbering (Classic
+  // Collection reprints print the original "4/102", TCGdex numbers them 001–030). The printed form,
+  // when known, is the physical truth.
+  if (candidate?.printedNumber) {
+    const [n, t] = String(candidate.printedNumber).split('/');
+    candidate = { ...candidate, localId: n, printedTotal: t != null && t !== '' ? Number(t) : candidate.printedTotal };
+  }
   const number = compare(parsed?.number, candidate?.localId != null ? normalizeNumberToken(candidate.localId) : null, (a, b) => normalizeNumberToken(a) === b);
   const printedTotal = compare(parsed?.printedTotal, candidate?.printedTotal ?? null, (a, b) => Number(a) === Number(b));
   const setCode = compare(parsed?.setCode, candidate?.setAbbreviation ? String(candidate.setAbbreviation).toUpperCase() : null);

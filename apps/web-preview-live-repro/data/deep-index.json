@@ -9,17 +9,56 @@
  "layout": "float32 mean[inDims] then float32 M[inDims x dims] row-major; index int8 = round(normalized*127)",
  "training": {
   "method": "learned whitening (within-class covariance of simulated camera crops) + PCA",
-  "regularization": 0.3,
-  "trainCrops": 8000,
-  "heldOutCrops": 1600
+  "regularization": 0.15,
+  "trainCrops": 23160,
+  "heldOutCrops": 3180
  },
  "calibration": {
   "twinTau": 0.8,
-  "instantScore": 0.8,
-  "instantMargin": 0.06,
-  "heldOutTop1Mild": 0.97875,
-  "heldOutTop1Hard": 0.96,
-  "instantSingleFrame": 0.538125,
+  "heldOutTop1_hard": 0.95,
+  "heldOutTop1_hard2": 0.9085,
+  "heldOutTop1_mild": 0.9764,
+  "top1_30th": {
+   "hard": 0.968,
+   "hard2": 0.918,
+   "mild": 1.0
+  },
+  "top1_30th-c": {
+   "hard": 0.923,
+   "hard2": 0.885,
+   "mild": 1.0
+  },
+  "top1_M6a": {
+   "hard": 0.989,
+   "hard2": 0.898,
+   "mild": 1.0
+  },
+  "deployedModelTop1": {
+   "hard": 0.95,
+   "hard2": 0.9085,
+   "mild": 0.9764
+  },
+  "deployed_30th": {
+   "hard": 0.968,
+   "hard2": 0.918,
+   "mild": 1.0
+  },
+  "deployed_30th-c": {
+   "hard": 0.923,
+   "hard2": 0.885,
+   "mild": 1.0
+  },
+  "deployed_M6a": {
+   "hard": 0.989,
+   "hard2": 0.898,
+   "mild": 1.0
+  },
+  "scriptGap": 0.06,
+  "scriptGapDecided": 0.374,
+  "scriptCases": 895,
+  "instantScore": 0.86,
+  "instantMargin": 0.04,
+  "instantSingleFrame": 0.205,
   "closedWrong": 0,
   "openSetNonTwinFalse": 0
  }

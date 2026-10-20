@@ -77,6 +77,21 @@ test('TCGCSV product normalizer maps category 3 to EN and fraction number to loc
   assert.equal(decision.matches[0]?.entity_id, charizardEn.entity_id);
 });
 
+test('TCGCSV names carrying the printed number ("Greninja ex - 021/128") still match by group, number and name', () => {
+  const group: TcgcsvGroup = { groupId: 24722, name: 'ME: 30th Celebration', abbreviation: '30C', categoryId: 3 };
+  const product: TcgcsvProduct = {
+    productId: 696676, name: 'Greninja ex - 021/128', cleanName: 'Greninja ex 021 128', categoryId: 3, groupId: 24722,
+    extendedData: [{ name: 'Number', value: '021/128' }],
+  };
+  const greninja = { ...charizardEn, entity_id: 'greninja-30th-en', name: 'Greninja ex', collector_number_normalized: '21', set_name: '30th Celebration', set_code: '30th' };
+  const other = { ...greninja, entity_id: 'greninja-other', set_name: 'Twilight Masquerade', set_code: 'sv06' };
+  const decision = decideTcgcsvEnrichment(normalizeTcgcsvProduct(group, product), [greninja, other]);
+  assert.equal(decision.status, 'AUTO_MATCH');
+  assert.equal(decision.matches[0]?.entity_id, 'greninja-30th-en');
+  const wrongName = decideTcgcsvEnrichment(normalizeTcgcsvProduct(group, { ...product, name: 'Frogadier - 021/128', cleanName: 'Frogadier 021 128' }), [greninja]);
+  assert.notEqual(wrongName.status, 'AUTO_MATCH', 'the name must still agree');
+});
+
 test('TCGCSV category 85 maps to JA and does not match EN candidate', () => {
   const group: TcgcsvGroup = { groupId: 200, name: 'Pokemon Card 151', categoryId: 85 };
   const product: TcgcsvProduct = {

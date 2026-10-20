@@ -17,6 +17,9 @@ export async function loadCandidatePool(lang) {
     if (pool?.schema !== 'tcg-lens-candidate-pool-v1' || !Array.isArray(pool.items)) return null;
     const byNumber = new Map();
     for (const item of pool.items) {
+      // Index by the number printed on the card too (Classic Collection "4/102").
+      const printed = item.printedNumber ? normalizeNumber(String(item.printedNumber).split('/')[0]) : null;
+      if (printed && printed !== normalizeNumber(item.localId)) { if (!byNumber.has(printed)) byNumber.set(printed, []); byNumber.get(printed).push(item); }
       const key = normalizeNumber(item.localId);
       if (!byNumber.has(key)) byNumber.set(key, []);
       byNumber.get(key).push(item);
@@ -37,7 +40,7 @@ export function normalizeNumber(value) {
 
 export function publicItem(item) {
   return {
-    id: item.id, entityId: item.entityId, name: item.name, localId: item.localId, printedTotal: item.printedTotal,
+    id: item.id, entityId: item.entityId, name: item.name, localId: item.localId, printedTotal: item.printedTotal, printedNumber: item.printedNumber || null,
     lang: item.lang, setId: item.setId, setName: item.setName, setAbbreviation: item.setAbbreviation,
     releaseDate: item.releaseDate, image: item.image, setReadiness: item.setReadiness, visualOnlyLockAllowed: item.visualOnlyLockAllowed === true,
     lockBlockedReason: item.lockBlockedReason || null, artworkTwins: item.artworkTwins ?? 0,

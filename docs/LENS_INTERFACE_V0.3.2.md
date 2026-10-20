@@ -156,3 +156,41 @@ first comparison; 3.6–5 s after opening the page, of which ~3 s is the first-l
 (cached afterwards). FR card on busy table, FR on wood, EN card: instant lock; French proven in the
 background ~5 s later. JA Arceus V (Latin twins exist): locked on the right Japanese printing once
 Japanese was read. Tests 81/81, benchmark 18/18, FCIR 0.
+
+## v0.3.6 — Database gaps (30th Anniversary), retrained recognition, twin safety
+
+**Database.**
+- TCGCSV matching fix: TCGplayer names carrying the printed number ("Greninja ex - 021/128") now match
+  by group + number + name. 30th Celebration EN TCGplayer mapping 61 → 157/158; 4 275 false
+  EXTERNAL_ID_COLLISION conflicts from the same cause were resolved with the same comparison function.
+- `apps/ingestion/src/tcgplayer-gap-import.ts` (`npm run tcgplayer:gaps`):
+  - CREATE Japanese expansions TCGdex lacks (canonical, method `BOOTSTRAP_TCGPLAYER_GAP`, provenance kept):
+    M6a MEGA Expansion 30th Celebration (176), MF 30th Celebration Premium Deck Set, MEE/MEM/MEZ, MP1,
+    MBG/MBD — 8 sets, 350 printings, 1 351 prices.
+  - MAP sets without TCGplayer links to their group (Jaccard ≥ 0.6, release ±10 days, unique names,
+    numbers must agree unless the set is systematically renumbered): 30th Classic Collection, Celebrations
+    Classic Collection, Hidden Fates Shiny Vault, Black & White… The number printed on the card is kept
+    (`tcgplayer_printed_number`, e.g. "4/102") and used by OCR corroboration and number lookup.
+  - IMAGES: TCGplayer 1000 px product image as REFERENCE when TCGdex has none (≈ 3 400 printings).
+- Coverage build: TCGplayer images as fallback references; an artwork twin counts as indexed when the
+  same TCGdex card (shared id) is indexed in another language. Lock-blocked printings: FR 1 041 → 203,
+  EN 853 → 191. Pool: 43 595 references (FR 17 265, EN 20 711, JA 5 619).
+
+**Recognition retrained.** 23 160 training crops incl. a new hard2 level (slight perspective, holo /
+reverse sheen, sleeve streak, white balance, hand shadow, motion blur, low resolution, JPEG). Held-out
+3 180 crops: mild 97.6 %, hard 95.0 %, hard2 90.9 % (previous model hard2 83.2 %); 30th Classic
+Collection hard2 46 % → 88 %, 30th 84 % → 92 %, M6a 84 % → 90 %. Instant thresholds now chosen by the
+training script (most permissive pair with zero wrong / zero open-set false locks, also at a safety margin)
+and read by the app from `deep-index.json` (0.86 / 0.04). Queries average the last 3 frames of a track.
+
+**Twins.**
+- Latin vs Japanese printings of the same artwork (every 30th card has an M6a twin): calibrated visual
+  script proof — gap ≥ 0.06 decides with 0 errors on 895 held-out cases; otherwise OCR decides.
+- Same-script twins are not visually separable reliably (errors up to a 0.15 gap), and twins printing the
+  same number/total (Base Set / Base Set 2 / Legendary Collection / Classic Collection Charizard "4/102")
+  cannot be separated by OCR either: AMBIGUOUS `artwork_twins_same_number`. Before v0.3.6 the printed-
+  number path could lock the visual top among such twins — fixed, with a benchmark scenario.
+
+**E2E (headless, CPU):** 30th FR card instant (4.2 s from page open incl. model load; was 20 s), 30th JA
+(M6a) instant (4.2 s), 30th Classic Collection Charizard → honest AMBIGUOUS. Tests 83/83, benchmark 19/19,
+FCIR 0.

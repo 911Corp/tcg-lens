@@ -28,7 +28,7 @@ export function expectedIdentityAtMs(t) {
 // ocrRead lets a scenario inject a raw printed-metadata read for the visual top (contradiction tests).
 // languages/langRead (v0.3.2 auto-language): the visual top is a family present in `languages`;
 // langRead({candidateId, t}) returns the language read from printed text on each OCR pass.
-export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null, lockBlockedReason = null, languages = null, langRead = null, autoLanguage = true, calibrated = false, twinFree = true } = {}) {
+export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null, lockBlockedReason = null, languages = null, langRead = null, autoLanguage = true, calibrated = false, twinFree = true, twinNumberDistinct = true } = {}) {
   const policy = calibrated ? { ...DEFAULT_POLICY, ...CALIBRATED_POLICY } : { ...DEFAULT_POLICY };
   const events = [];
   let now = 0;
@@ -167,7 +167,7 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
     const resolvedLang = languages ? context.langConsensus.resolved(id, languages) : null;
     const languageContradiction = languages ? context.langConsensus.contradicted(id, languages) : null;
     const languageOutside = languages ? context.langConsensus.outside(id, languages) : false;
-    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction, languageOutside, calibrated, twinFree: calibrated ? twinFree : undefined, languageProofRequired: languageSuspects.has(id) };
+    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction, languageOutside, calibrated, twinFree: calibrated ? twinFree : undefined, twinNumberDistinct: calibrated ? twinNumberDistinct : undefined, languageProofRequired: languageSuspects.has(id) };
     const temporal = context.consensus.observe({ candidateId: id, score: row.score, margin: row.margin, quality: 0.8, at: now });
     events.push({ t: now, type: 'VISUAL', candidateId: id, score: row.score, margin: row.margin, temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction, temporalEpoch: temporal.epoch, locked: context.locked?.id || null });
     if (!context.locked && corroborateB && id === 'test-b' && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4 && now - context.lastOcrAt >= policy.ocrIntervalMs) {

@@ -69,6 +69,11 @@ export class EvidenceFusion {
     const candidateId = top.candidateId;
 
     const contradiction = this.contradictions.evaluate({ candidateId, temporal, visual, ocr, barcode, canonical });
+    // v0.3.6: artwork twins that also print the same number/total cannot be separated by printed
+    // evidence: the edition stays undecided (never guessed).
+    if (visual.calibrated === true && visual.twinFree === false && visual.twinNumberDistinct === false && top.votes >= p.minTemporalVotes) {
+      return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: 'artwork_twins_same_number' };
+    }
     if (contradiction.hardBlock) {
       return {
         decision: 'AMBIGUOUS',

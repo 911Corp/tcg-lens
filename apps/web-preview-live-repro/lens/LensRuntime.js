@@ -95,8 +95,16 @@ export class LensRuntime {
   /** Calibrated thresholds belong to the calibrated index score scale (v0.3.5). */
   _applyCalibratedPolicy() {
     if (this.policy.calibratedInstant) return;
-    this.policy = { ...this.policy, ...CALIBRATED_POLICY };
-    this.fusion.policy = { ...this.fusion.policy, ...CALIBRATED_POLICY };
+    // Thresholds calibrated with the index itself (tools/deep/train-and-export.py) take precedence.
+    const cal = this.index.deep?.meta?.calibration || {};
+    const fromIndex = Number.isFinite(cal.instantScore) && Number.isFinite(cal.instantMargin) ? {
+      instantScore: cal.instantScore, instantMargin: cal.instantMargin,
+      temporalSwitchScore: cal.instantScore, temporalSwitchMargin: cal.instantMargin,
+      changeVisualScore: cal.instantScore, changeVisualMargin: cal.instantMargin,
+      ...(Number.isFinite(cal.scriptGap) ? { scriptGap: cal.scriptGap } : {}),
+    } : {};
+    this.policy = { ...this.policy, ...CALIBRATED_POLICY, ...fromIndex };
+    this.fusion.policy = { ...this.fusion.policy, ...CALIBRATED_POLICY, ...fromIndex };
     this.tracker.minStableHits = this.policy.minStableHits;
     const c = this.context;
     if (c) {
@@ -294,7 +302,7 @@ export class LensRuntime {
     const token = c.generation;
     try {
       const q0 = performance.now();
-      const candidates = await this.index.query(frame.canvas, this.lang, this.embedding, this.policy.topK);
+      const candidates = await this.index.query(frame.canvas, this.lang, this.embedding, this.policy.topK, { track: `${track.id}:${c.generation}` });
       this.stats.queries++; this.stats.queryMs = Math.round(performance.now() - q0);
       this.stats.top = candidates[0] ? `${candidates[0].id} ${candidates[0].score.toFixed(3)} Δ${(candidates[0].score - (candidates[1]?.score ?? 0)).toFixed(3)}${candidates[0].embeddingVerified ? '' : ' (rapide)'}` : 'aucun';
       if (!this._isCurrent(token)) return;
@@ -349,6 +357,10 @@ export class LensRuntime {
     const langsOf = id => (id === top.id ? top.languages : twins.find(t => t.id === id)?.languages) || [];
     const group = [top.id, ...twins.map(t => t.id)];
     const lang = c.langConsensus.resolved(CARD);
+    // Calibrated visual script proof (Latin vs Japanese): when the image clearly favours the top
+    // family's script, twins of the other script are ruled out without waiting for OCR.
+    const scriptOf = ls => ((ls || []).includes('ja') ? 'ja' : 'latin');
+    const visualScript = !lang && Number.isFinite(top.scriptGap) && Number.isFinite(this.policy.scriptGap) && top.scriptGap >= this.policy.scriptGap ? top.script : null;
     let chosenId = top.id;
     const prev = c.visualEvidence?.candidateId;
     if (prev && group.includes(prev) && cands.some(x => x.id === prev)) chosenId = prev;
@@ -357,11 +369,17 @@ export class LensRuntime {
         .sort((a, b) => (top.twinScores?.[b] ?? (b === top.id ? top.score : 0)) - (top.twinScores?.[a] ?? (a === top.id ? top.score : 0)))[0];
       if (alt) chosenId = alt;
     }
+    if (visualScript && scriptOf(langsOf(chosenId)) !== visualScript) chosenId = top.id;
     const chosen = cands.find(x => x.id === chosenId) || top;
     chosen.calibrated = true;
     chosen.marginNonTwin = top.marginNonTwin;
     chosen.twinGroup = group;
-    chosen.activeTwins = group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)));
+    chosen.activeTwins = group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)) && (!visualScript || scriptOf(langsOf(id)) === visualScript));
+    chosen.visualScript = visualScript;
+    // Printed evidence can only separate twins whose printed number/total differ (Base Set Charizard,
+    // Base Set 2, Legendary Collection and the Classic Collections all print "4/102").
+    const printedKey = x => (x?.printedNumber ? String(x.printedNumber) : `${String(x?.localId ?? '').replace(/^0+(?=\d)/, '')}/${x?.printedTotal ?? ''}`).toLowerCase();
+    chosen.twinNumberDistinct = chosen.activeTwins.every(id => { const t = cands.find(x => x.id === id); return Boolean(t) && printedKey(t) !== printedKey(chosen); });
     if (chosen !== top) chosen.score = Math.max(chosen.score, top.score - 0.0001);
     return [chosen, ...cands.filter(x => x !== chosen)];
   }
@@ -378,6 +396,7 @@ export class LensRuntime {
       calibrated: top.calibrated === true,
       languageProofRequired: this.languageSuspects.has(top.id),
       twinFree: top.calibrated === true ? (top.activeTwins?.length ?? 0) === 0 : undefined,
+      twinNumberDistinct: top.calibrated === true ? top.twinNumberDistinct === true : undefined,
       languageWaitMs: c.langWait?.id === top.id ? performance.now() - c.langWait.since : 0,
     };
   }
@@ -520,7 +539,11 @@ export class LensRuntime {
     }
     // The locked printing is the row of the proven language (never a guessed one).
     const resolved = c.visualEvidence?.candidateId === candidate.id ? c.visualEvidence.resolvedLang : null;
-    const row = (resolved && candidate.byLang?.[resolved]) || (candidate.languages?.length === 1 && candidate.byLang?.[candidate.languages[0]]) || candidate;
+    // Unproven language: display the printing in the phone's language when it exists (name only;
+    // the language itself stays "à confirmer").
+    const uiLang = (typeof navigator !== 'undefined' ? navigator.language || 'fr' : 'fr').slice(0, 2);
+    const row = (resolved && candidate.byLang?.[resolved]) || (candidate.languages?.length === 1 && candidate.byLang?.[candidate.languages[0]])
+      || (decision.languageUnverified && candidate.byLang?.[uiLang]) || candidate;
     const { byLang, languages, ...printing } = row;
     const identity = decision.languageUnverified
       ? { ...printing, lang: null, languageUnverified: true, languageCandidates: candidate.languages || [printing.lang].filter(Boolean) }

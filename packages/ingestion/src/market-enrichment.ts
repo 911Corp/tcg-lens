@@ -1,4 +1,5 @@
 import { collectorNumberMatchKeyV1, normalizeTextV1 } from './normalization.js';
+import { tcgplayerComparableName } from './cardmarket-crosswalk.js';
 import type { NormalizedCardmarketProduct } from './cardmarket.js';
 import type { NormalizedTcgcsvProduct } from './tcgcsv.js';
 
@@ -43,7 +44,9 @@ export function decideTcgcsvEnrichment(product: NormalizedTcgcsvProduct, candida
   const exactName = candidates.filter(c =>
     c.language_code === product.languageCode &&
     collectorNumberMatchKeyV1(c.collector_number_normalized) === collectorNumberMatchKeyV1(product.collectorNumberNormalized) &&
-    normalizeTextV1(c.name) === product.normalizedName
+    // TCGplayer names many cards "Greninja ex - 021/128": compare without the printed number suffix.
+    (normalizeTextV1(c.name) === product.normalizedName
+      || tcgplayerComparableName(c.name, c.collector_number_normalized) === tcgplayerComparableName(product.normalizedName, product.collectorNumberNormalized))
   );
   const setMatches = exactName.filter(c => setMatchesTcgcsv(c, product.groupName, product.groupAbbreviation));
   if (setMatches.length === 1) return { status: 'AUTO_MATCH', matches: setMatches, ruleId: 'TCGCSV_NUMBER_NAME_GROUP_EXACT', confidence: 0.98 };

@@ -23,7 +23,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ lang, buildId: pool.buildId, count: ranked.length, truncated: ranked.length > 60, items: ranked.slice(0, 60).map(publicItem) });
     }
     let items = pool.byNumber.get(normalizeNumber(number)) || [];
-    if (Number.isFinite(total) && total > 0) items = items.filter(item => item.printedTotal === total);
+    if (Number.isFinite(total) && total > 0) items = items.filter(item => item.printedTotal === total || Number(String(item.printedNumber || '').split('/')[1]) === total);
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     return res.status(200).json({ lang, buildId: pool.buildId, count: items.length, truncated: items.length > 120, items: items.slice(0, 120).map(publicItem) });
   } catch (e) { return res.status(500).json({ error: String(e?.message || e) }); }
@@ -40,7 +40,7 @@ async function multiLang(req, res) {
     const pool = await loadCandidatePool(lang);
     if (!pool) continue;
     let items = pool.byNumber.get(normalizeNumber(number)) || [];
-    if (Number.isFinite(total) && total > 0) items = items.filter(item => item.printedTotal === total);
+    if (Number.isFinite(total) && total > 0) items = items.filter(item => item.printedTotal === total || Number(String(item.printedNumber || '').split('/')[1]) === total);
     all.push(...items.slice(0, 60).map(publicItem));
   }
   res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');

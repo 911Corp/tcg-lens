@@ -18,14 +18,14 @@ const chromium = (process.argv.find(a => a.startsWith('--chromium=')) || '').sli
 const { chromium: pw } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-core');
 
 export const INDEX_SCHEMA = 'tcg-lens-visual-index-v1';
-const fileFor = u => path.join(refDir, u.replace('https://assets.tcgdex.net/', '').replace(/\//g, '_'));
+const fileFor = u => path.join(refDir, u.replace(/^https?:\/\/(assets\.tcgdex\.net\/)?/, '').replace(/\//g, '_'));
 
 const browser = await pw.launch({ executablePath: chromium });
 const page = await browser.newPage();
 await page.route('http://idx.local/**', async route => {
   const url = new URL(route.request().url());
   try {
-    if (url.pathname.startsWith('/ref/')) return route.fulfill({ body: await fs.readFile(path.join(refDir, decodeURIComponent(url.pathname.slice(5)))), contentType: 'image/webp' });
+    if (url.pathname.startsWith('/ref/')) { const f = decodeURIComponent(url.pathname.slice(5)); return route.fulfill({ body: await fs.readFile(path.join(refDir, f)), contentType: /\.jpe?g$/i.test(f) ? 'image/jpeg' : 'image/webp' }); }
     if (url.pathname === '/') return route.fulfill({ body: '<!doctype html><title>idx</title>', contentType: 'text/html' });
     return route.fulfill({ body: await fs.readFile(path.join(appDir, url.pathname)), contentType: 'text/javascript' });
   } catch { return route.fulfill({ status: 404, body: '' }); }
@@ -56,7 +56,7 @@ for (const lang of ['fr', 'en', 'ja']) {
       dims = d.length;
       vectors.push(d);
       rows.push([it.id, it.name, it.localId, it.printedTotal ?? null, it.setId, it.setName, it.setAbbreviation ?? null, it.releaseDate ?? null,
-        it.image.replace('https://assets.tcgdex.net/', ''), (it.visualOnlyLockAllowed ? 1 : 0), it.lockBlockedReason || null, it.entityId]);
+        it.image.replace('https://assets.tcgdex.net/', ''), (it.visualOnlyLockAllowed ? 1 : 0), it.lockBlockedReason || null, it.entityId, it.printedNumber || null]);
     });
   }
   const bin = new Int8Array(vectors.length * dims);
@@ -65,7 +65,7 @@ for (const lang of ['fr', 'en', 'ja']) {
   await fs.writeFile(path.join(appDir, 'data', `visual-index-${lang}.bin.gz`), zlib.gzipSync(Buffer.from(bin.buffer), { level: 9 }));
   await fs.writeFile(path.join(appDir, 'data', `visual-index-${lang}.json`), JSON.stringify({
     schema: INDEX_SCHEMA, lang, dims, count: rows.length, poolBuildId: pool.buildId, asOf: pool.asOf, imageBase: 'https://assets.tcgdex.net/',
-    columns: ['id', 'name', 'localId', 'printedTotal', 'setId', 'setName', 'setAbbreviation', 'releaseDate', 'imagePath', 'visualOnlyLockAllowed', 'lockBlockedReason', 'entityId'],
+    columns: ['id', 'name', 'localId', 'printedTotal', 'setId', 'setName', 'setAbbreviation', 'releaseDate', 'imagePath', 'visualOnlyLockAllowed', 'lockBlockedReason', 'entityId', 'printedNumber'],
     rows,
   }));
   console.log(`${lang}: ${rows.length} refs, ${dims} dims, ${missing} missing images`);

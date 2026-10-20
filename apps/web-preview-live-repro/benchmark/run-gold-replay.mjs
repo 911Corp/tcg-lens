@@ -95,6 +95,12 @@ const scenarios = [
     requirements: { minSegmentCoverage: 1, lockSequence: ['test-a', 'test-b', 'test-a'] },
   },
   {
+    // Base Set / Base Set 2 / Classic Collection Charizard all print "4/102": an exact read cannot pick.
+    id: 'calibrated-same-number-twins-never-lock-even-with-exact-printed-number',
+    run: () => runReplay({ calibrated: true, twinFree: false, twinNumberDistinct: false, languages: ['en'], langRead: () => 'en', ocrRead: ({ candidateId }) => ({ candidateId, collectorExact: true, strongNameMatch: true, contradiction: false }) }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
     id: 'calibrated-artwork-twins-never-lock-without-printed-evidence',
     run: () => runReplay({ calibrated: true, twinFree: false, languages: ['fr', 'en'] }),
     requirements: { minSegmentCoverage: 0, lockSequence: [] },

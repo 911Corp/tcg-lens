@@ -10,14 +10,14 @@ const work = process.env.DEEP_WORK || '/tmp/tcg-lens-deep'; await fs.mkdir(work,
 const [lang, part = '0', parts = '1'] = process.argv.slice(2);
 const meta = JSON.parse(await fs.readFile(`${app}/data/visual-index-${lang}.json`, 'utf8'));
 const col = meta.columns.indexOf('imagePath');
-const all = meta.rows.map((r, i) => ({ i, file: r[col].replace(/\//g, '_') }));
+const all = meta.rows.map((r, i) => ({ i, file: r[col].replace(/^https?:\/\//, '').replace(/\//g, '_') }));
 const mine = all.filter(x => x.i % Number(parts) === Number(part));
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
 const page = await browser.newPage();
 await page.route('http://deep.local/**', async route => {
   const p = decodeURIComponent(new URL(route.request().url()).pathname);
   if (p === '/') return route.fulfill({ body: '<!doctype html><title>d</title>', contentType: 'text/html' });
-  try { return route.fulfill({ body: await fs.readFile(path.join(ref, p.slice(5))), contentType: 'image/webp' }); } catch { return route.fulfill({ status: 404, body: '' }); }
+  try { return route.fulfill({ body: await fs.readFile(path.join(ref, p.slice(5))), contentType: /\.jpe?g$/i.test(p) ? 'image/jpeg' : 'image/webp' }); } catch { return route.fulfill({ status: 404, body: '' }); }
 });
 await page.goto('http://deep.local/');
 await page.evaluate(async () => {

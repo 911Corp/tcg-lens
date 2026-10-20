@@ -19,19 +19,23 @@ import numpy as np
 APP = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 WORK = os.environ.get('DEEP_WORK', '/tmp/tcg-lens-deep')
 LANGS = ['fr', 'en', 'ja']
-WF, D, REG, TAU = 0.5, 128, 0.3, 0.80
+WF = float(os.environ.get('WF', 0.5)); D = int(os.environ.get('DIMS', 128)); REG = float(os.environ.get('REG', 0.3)); TAU = 0.80
+EVAL_ONLY = os.environ.get('EVAL_ONLY') == '1'
 INSTANT_SCORE, INSTANT_MARGIN = 0.80, 0.06
 
 nz = lambda X: X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-9)
-rows, embs, fasts, keys, counts = [], [], [], [], []
+rows, embs, fasts, keys, counts, sets, files = [], [], [], [], [], [], []
 for l in LANGS:
     meta = json.load(open(f'{APP}/data/visual-index-{l}.json'))
     n = meta['count']; ii = meta['columns'].index('id'); counts.append(n)
     embs.append(sum(np.fromfile(f'{WORK}/emb-{l}-{p}.bin', np.float32).reshape(n, 1280) for p in (0, 1)))
     fasts.append(np.fromfile(f'{APP}/data/visual-index-{l}.bin', np.int8).reshape(n, meta['dims']).astype(np.float32) / 127)
     rows += [r[ii] for r in meta['rows']]; keys += [(l, i) for i in range(n)]
+    si = meta['columns'].index('setId'); sets += [r[si] for r in meta['rows']]
+    pi = meta['columns'].index('imagePath'); files += [r[pi].replace('https://', '').replace('http://', '').replace('/', '_') for r in meta['rows']]
 E, FA = nz(np.concatenate(embs)), nz(np.concatenate(fasts))
-kidx = {k: i for i, k in enumerate(keys)}
+# Crops are linked to their reference by image file (stable when the index grows), not by row.
+fidx = {f: i for i, f in enumerate(files)}
 famid = {f: i for i, f in enumerate(dict.fromkeys(rows))}; F = np.array([famid[f] for f in rows]); NF = len(famid)
 feat = lambda Dp, Fa: np.concatenate([Dp * (1 - WF) ** .5, Fa * WF ** .5], 1)
 
@@ -43,7 +47,9 @@ def crops(pre):
 
 tm, TQ, TF = crops('t-'); qm, Q, QF = crops('q-')
 R0, T0, Q0 = feat(E, FA), feat(TQ, TF), feat(Q, QF)
-diff = T0 - R0[np.array([kidx[(m['lang'], m['row'])] for m in tm])]
+keep = np.array([m['file'] in fidx for m in tm])
+tm = [m for m, k in zip(tm, keep) if k]; T0 = T0[keep]
+diff = T0 - R0[np.array([fidx[m['file']] for m in tm])]
 mu = R0.mean(0); Cw = diff.T @ diff / len(diff)
 w, V = np.linalg.eigh(Cw + REG * np.trace(Cw) / Cw.shape[0] * np.eye(Cw.shape[0]))
 P = V / np.sqrt(w)
@@ -65,22 +71,68 @@ def twins(t, exclude=None):
     if exclude is not None: fs[exclude] = -9
     return set(np.where(fs >= TAU)[0])
 top1 = FS.argmax(1) == qf
-stats = dict(heldOutTop1Mild=float(top1[lvl == 'mild'].mean()), heldOutTop1Hard=float(top1[lvl == 'hard'].mean()))
-wrong = open_false = instant = 0
+stats = {f'heldOutTop1_{L}': round(float(top1[lvl == L].mean()), 4) for L in sorted(set(lvl))}
+qset = np.array([m.get('set') for m in qm]); focus = np.array([bool(m.get('focus')) for m in qm])
+for sname in sorted(set(qset[focus])):
+    sel = qset == sname
+    stats[f'top1_{sname}'] = {L: round(float(top1[sel & (lvl == L)].mean()), 3) for L in sorted(set(lvl[sel]))}
+# Same held-out crops through the currently deployed projection (regression check).
+try:
+    old = json.load(open(f'{APP}/data/deep-index.json'))
+    if old['inDims'] == M.shape[0]:
+        f = np.frombuffer(gzip.decompress(open(f'{APP}/data/deep-model.bin.gz', 'rb').read()), np.float32)
+        omu, oM = f[:old['inDims']], f[old['inDims']:].reshape(old['inDims'], old['dims'])
+        oR, oq = nz((R0 - omu) @ oM), nz((Q0 - omu) @ oM)
+        oFS = np.full((len(oq), NF), -9, np.float32); oS = oq @ oR.T
+        for k in range(len(oq)): np.maximum.at(oFS[k], F, oS[k])
+        ot = oFS.argmax(1) == qf
+        stats['deployedModelTop1'] = {L: round(float(ot[lvl == L].mean()), 4) for L in sorted(set(lvl))}
+        for sname in sorted(set(qset[focus])):
+            sel = qset == sname; stats[f'deployed_{sname}'] = {L: round(float(ot[sel & (lvl == L)].mean()), 3) for L in sorted(set(lvl[sel]))}
+except FileNotFoundError: pass
+# Candidate decisions for every held-out crop (closed set and open set = true family removed).
+cases = []  # (open, score, nonTwinMargin, twinFree, correct, trueIsTwinOfTop)
 for k in range(len(q)):
     for openset in (False, True):
         fs = FS[k].copy()
         if openset: fs[qf[k]] = -9
         o = np.argsort(-fs)[:50]; t = o[0]; tw = twins(t, qf[k] if openset else None)
         sec = next((fs[g] for g in o[1:] if g not in tw), -9)
-        ok = not tw and fs[t] >= INSTANT_SCORE and fs[t] - sec >= INSTANT_MARGIN
-        if not ok: continue
-        if openset and qf[k] not in twins(t): open_false += 1
-        elif not openset: instant += 1; wrong += int(t != qf[k])
-stats.update(instantSingleFrame=instant / len(q), closedWrong=wrong, openSetNonTwinFalse=open_false)
+        cases.append((openset, float(fs[t]), float(fs[t] - sec), not tw, t == qf[k], openset and qf[k] in twins(t)))
+C = np.array([(c[0], c[1], c[2], c[3], c[4], c[5]) for c in cases], dtype=object)
+op = C[:, 0].astype(bool); sc = C[:, 1].astype(float); mg = C[:, 2].astype(float); tf = C[:, 3].astype(bool); co = C[:, 4].astype(bool); tt = C[:, 5].astype(bool)
+def outcome(T, Mg):
+    acc = tf & (sc >= T) & (mg >= Mg)
+    return int((acc & ~op & ~co).sum()), int((acc & op & ~tt).sum()), float((acc & ~op & co).sum() / max(1, (~op).sum()))
+# Most permissive thresholds with zero wrong / zero open-set non-twin false locks, also holding with a
+# safety margin (T - 0.02, M - 0.01) so the bars do not sit on the edge of a failure.
+best = None
+for T in np.arange(0.76, 0.95, 0.01):
+    for Mg in np.arange(0.04, 0.16, 0.01):
+        w1, o1, a1 = outcome(T, Mg); w2, o2, _ = outcome(T - 0.02, Mg - 0.01)
+        if w1 or o1 or w2 or o2: continue
+        if best is None or a1 > best[2]: best = (round(float(T), 2), round(float(Mg), 2), a1)
+if best is None: sys.exit('calibration gate failed: no threshold pair gives zero wrong and zero open-set false locks')
+INSTANT_SCORE, INSTANT_MARGIN = best[0], best[1]
+wrong, open_false, rate = outcome(INSTANT_SCORE, INSTANT_MARGIN)
+instant = rate
+# Visual script proof (Latin vs Japanese printings sharing the artwork): smallest gap between the top
+# family and its best other-script family with zero errors at gap and gap - 0.01 (safety margin).
+langs_arr = np.array([k[0] for k in keys]); fam_script = np.zeros(NF, int)
+for i, fi in enumerate(F): fam_script[fi] = 1 if langs_arr[i] == 'ja' else 0
+gaps = []
+for k, m in enumerate(qm):
+    t = FS[k].argmax(); other = FS[k].copy(); other[fam_script == fam_script[t]] = -9; o = other.argmax()
+    if FS[k][o] >= TAU: gaps.append((FS[k][t] - FS[k][o], fam_script[t] == (1 if m['lang'] == 'ja' else 0)))
+G = np.array(gaps, dtype=float) if gaps else np.zeros((0, 2))
+SCRIPT_GAP = next((round(float(g), 2) for g in np.arange(0.02, 0.2, 0.01)
+                   if len(G) and not ((G[:, 0] >= g - 0.01) & (G[:, 1] == 0)).any()), None)
+stats.update(scriptGap=SCRIPT_GAP, scriptGapDecided=round(float((G[:, 0] >= SCRIPT_GAP).mean()), 3) if SCRIPT_GAP and len(G) else 0, scriptCases=len(G))
+stats.update(instantScore=INSTANT_SCORE, instantMargin=INSTANT_MARGIN, instantSingleFrame=round(instant, 4), closedWrong=wrong, openSetNonTwinFalse=open_false)
 print(json.dumps(stats, indent=1))
 if wrong or open_false:
     sys.exit('calibration gate failed: wrong or open-set false locks > 0 — thresholds must be raised')
+if EVAL_ONLY: sys.exit(0)
 
 off = 0
 for l, n in zip(LANGS, counts):
@@ -91,6 +143,6 @@ json.dump({'schema': 'tcg-lens-deep-index-v1', 'backbone': 'mobilenet_v2_alpha0.
            'deepDims': 1280, 'fastDims': 236, 'inDims': int(M.shape[0]), 'dims': D, 'fastWeight': WF,
            'layout': 'float32 mean[inDims] then float32 M[inDims x dims] row-major; index int8 = round(normalized*127)',
            'training': {'method': 'learned whitening (within-class covariance of simulated camera crops) + PCA', 'regularization': REG, 'trainCrops': len(tm), 'heldOutCrops': len(qm)},
-           'calibration': {'twinTau': TAU, 'instantScore': INSTANT_SCORE, 'instantMargin': INSTANT_MARGIN, **stats}},
+           'calibration': {'twinTau': TAU, **stats}},
           open(f'{APP}/data/deep-index.json', 'w'), indent=1)
 print('exported', off, 'references')

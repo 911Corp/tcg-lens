@@ -8,6 +8,7 @@
     "test:integration": "tsx test/tcgdex-postgres.integration.ts",
     "cardmarket": "tsx src/cardmarket-import.ts",
     "tcgcsv": "tsx src/tcgcsv-import.ts",
+    "tcgplayer:gaps": "tsx src/tcgplayer-gap-import.ts",
     "test:market-integration": "tsx test/market-enrichment-postgres.integration.ts",
     "barcode": "tsx src/barcode-import.ts",
     "test:sealed-integration": "tsx test/sealed-barcode-postgres.integration.ts",

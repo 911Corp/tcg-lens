@@ -90,7 +90,7 @@ export class PrecomputedIndex {
     return {
       id: r[c.id], lang, name: r[c.name], localId: r[c.localId], printedTotal: r[c.printedTotal], setId: r[c.setId],
       setName: r[c.setName], setAbbreviation: r[c.setAbbreviation], releaseDate: r[c.releaseDate],
-      image: `${L.meta.imageBase}${r[c.imagePath]}`, visualOnlyLockAllowed: r[c.visualOnlyLockAllowed] === 1,
+      image: /^https?:/.test(r[c.imagePath]) ? r[c.imagePath] : `${L.meta.imageBase}${r[c.imagePath]}`, printedNumber: c.printedNumber != null ? r[c.printedNumber] || null : null, visualOnlyLockAllowed: r[c.visualOnlyLockAllowed] === 1,
       lockBlockedReason: r[c.lockBlockedReason] || null, entityId: r[c.entityId],
     };
   }

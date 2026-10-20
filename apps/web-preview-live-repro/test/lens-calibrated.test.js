@@ -53,3 +53,12 @@ test('artwork twins never lock instantly; a foreign language read blocks; lock-b
   const proven = f.evaluate({ temporal: T(0.9, 0.2), visual: V({ resolvedLang: 'fr' }) });
   assert.equal(proven.decision, 'LOCK'); assert.equal(proven.languageUnverified, undefined);
 });
+
+test('twins printing the same number never lock on printed evidence', () => {
+  const f = new EvidenceFusion(P);
+  const ocr = { candidateId: 'x', collectorExact: true, strongNameMatch: true, contradiction: false };
+  const same = f.evaluate({ temporal: T(0.9, 0.2, 5), visual: V({ twinFree: false, twinNumberDistinct: false }), ocr });
+  assert.equal(same.decision, 'AMBIGUOUS'); assert.equal(same.reason, 'artwork_twins_same_number');
+  const distinct = f.evaluate({ temporal: T(0.9, 0.2, 5), visual: V({ twinFree: false, twinNumberDistinct: true, resolvedLang: 'fr' }), ocr });
+  assert.equal(distinct.decision, 'LOCK', 'a printed number unique among the twins does separate them');
+});

@@ -37,7 +37,7 @@ try {
   const rows = (await pool.query(
     `SELECT DISTINCT io.image_origin_id, io.source_url
        FROM image_origins io
-       JOIN data_sources ds ON ds.source_id=io.source_id AND ds.source_code='tcgdex'
+       JOIN data_sources ds ON ds.source_id=io.source_id AND ds.source_code IN ('tcgdex','tcgplayer')
        JOIN entity_images ei ON ei.image_id=io.image_id AND ei.role='REFERENCE'
        LEFT JOIN image_probes ip ON ip.image_origin_id=io.image_origin_id
       WHERE ip.image_origin_id IS NULL OR ip.checked_at < now() - ($1::text || ' hours')::interval

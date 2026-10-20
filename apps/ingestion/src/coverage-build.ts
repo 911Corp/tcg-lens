@@ -57,6 +57,7 @@ interface PrintingFact {
   variant_count: number;
   image_origin_id: string | null;
   image_url: string | null;
+  printed_number?: string | null;
   probe_ok: boolean | null;
   probe_status: number | null;
   cardmarket_verified: string[] | null;
@@ -128,11 +129,19 @@ try {
           priced AS (
             SELECT DISTINCT entity_id FROM market_observations
              WHERE observed_at >= ($1::date - ($2::text || ' days')::interval) AND observed_at < ($1::date + interval '1 day')),
+          -- v0.3.6: TCGdex reference first; a TCGplayer product image (gap import) when TCGdex has
+          -- none or its image probes broken.
+          tp AS (SELECT source_id FROM src WHERE source_code='tcgplayer'),
           ref_image AS (
             SELECT DISTINCT ON (ei.entity_id) ei.entity_id, io.image_origin_id, io.source_url
-              FROM entity_images ei JOIN image_origins io ON io.image_id=ei.image_id JOIN td ON td.source_id=io.source_id
-             WHERE ei.role='REFERENCE'
-             ORDER BY ei.entity_id, io.first_seen_at)
+              FROM entity_images ei JOIN image_origins io ON io.image_id=ei.image_id
+              LEFT JOIN image_probes ipr ON ipr.image_origin_id=io.image_origin_id
+             WHERE ei.role='REFERENCE' AND (io.source_id IN (SELECT source_id FROM td) OR io.source_id IN (SELECT source_id FROM tp))
+             ORDER BY ei.entity_id, (ipr.ok IS FALSE), (io.source_id IN (SELECT source_id FROM td)) DESC, io.first_seen_at),
+          printed AS (
+            SELECT DISTINCT ON (entity_id) entity_id, value_json #>> '{}' AS printed_number
+              FROM source_assertions WHERE field_path='tcgplayer_printed_number' AND status='ACTIVE'
+             ORDER BY entity_id, last_seen_at DESC)
      SELECT cp.entity_id, cp.set_id, cs.language_code, cp.name, cp.illustrator, cp.collector_number_raw, cp.collector_number_normalized,
             ext.tcgdex_card_id,
             (ce.status='ACTIVE' AND ce.resolution_state='CANONICAL') AS active_canonical,
@@ -141,7 +150,7 @@ try {
             COALESCE(v.variant_count, 0) AS variant_count,
             ri.image_origin_id, ri.source_url AS image_url, ip.ok AS probe_ok, ip.http_status AS probe_status,
             ext.cardmarket_verified, ext.tcgplayer_verified, v.cardmarket_asserted, v.tcgplayer_asserted,
-            (pr.entity_id IS NOT NULL) AS priced
+            (pr.entity_id IS NOT NULL) AS priced, pn.printed_number
        FROM card_printings cp
        JOIN card_sets cs ON cs.entity_id=cp.set_id
        JOIN catalog_entities ce ON ce.entity_id=cp.entity_id
@@ -151,6 +160,7 @@ try {
        LEFT JOIN market_conflicts mc ON mc.entity_id=cp.entity_id
        LEFT JOIN priced pr ON pr.entity_id=cp.entity_id
        LEFT JOIN ref_image ri ON ri.entity_id=cp.entity_id
+       LEFT JOIN printed pn ON pn.entity_id=cp.entity_id
        LEFT JOIN image_probes ip ON ip.image_origin_id=ri.image_origin_id
       WHERE ce.status <> 'MERGED'`,
     [asOf, String(PRICE_FRESHNESS_DAYS)]
@@ -241,7 +251,7 @@ try {
   interface PoolItem {
     id: string; entityId: string; name: string; localId: string; printedTotal: number | null; lang: string;
     setId: string | null; setName: string; setAbbreviation: string | null; releaseDate: string | null;
-    image: string; setReadiness: Readiness; visualOnlyLockAllowed: boolean;
+    image: string; printedNumber?: string; setReadiness: Readiness; visualOnlyLockAllowed: boolean;
     lockBlockedReason: string | null; artworkTwins: number;
   }
   // Eligibility for every printing, then artwork-twin groups (same language + name + illustrator).
@@ -264,10 +274,16 @@ try {
     list.push(f);
     twinGroups.set(key, list);
   }
+  // v0.3.6: a printing is visually covered when any printing of the same TCGdex card (shared id, same
+  // artwork — e.g. the English version of a French card) is in the live pool, since the Lens matches
+  // printing families by that id.
+  const familyIndexed = new Set<string>();
+  for (const f of facts) if (f.tcgdex_card_id && eligibilityById.get(f.entity_id)?.inLivePool) familyIndexed.add(f.tcgdex_card_id);
+  const visuallyCovered = (x: PrintingFact) => Boolean(eligibilityById.get(x.entity_id)?.inLivePool) || Boolean(x.tcgdex_card_id && familyIndexed.has(x.tcgdex_card_id));
   const twinsOf = (f: PrintingFact) => {
     const key = artworkTwinKey({ languageCode: f.language_code, name: f.name, illustrator: f.illustrator });
     const group = key ? (twinGroups.get(key) ?? []).filter(x => x.entity_id !== f.entity_id) : [];
-    return { total: group.length, unindexed: group.filter(x => !eligibilityById.get(x.entity_id)?.inLivePool).length };
+    return { total: group.length, unindexed: group.filter(x => !visuallyCovered(x)).length };
   };
   let lockBlockedCount = 0;
 
@@ -306,7 +322,8 @@ try {
       id: f.tcgdex_card_id ?? f.entity_id, entityId: f.entity_id, name: f.name, localId: f.collector_number_raw,
       printedTotal: sr.set.printed_card_count, lang: f.language_code, setId: sr.set.official_set_code, setName: sr.set.official_name,
       setAbbreviation: sr.set.official_abbreviation, releaseDate: sr.set.release_date,
-      image: `${(f.image_url as string).replace(/\/$/, '')}/low.webp`, setReadiness: sr.readiness, visualOnlyLockAllowed: twin.visualOnlyLockAllowed,
+      image: /\.(webp|png|jpe?g)$/i.test(f.image_url as string) ? (f.image_url as string) : `${(f.image_url as string).replace(/\/$/, '')}/low.webp`,
+      ...(f.printed_number ? { printedNumber: f.printed_number } : {}), setReadiness: sr.readiness, visualOnlyLockAllowed: twin.visualOnlyLockAllowed,
       lockBlockedReason: twin.lockBlockedReason, artworkTwins: twins.total
     });
     poolByLang.set(f.language_code, list);
