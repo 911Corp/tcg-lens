@@ -57,7 +57,7 @@ export class LensRuntime {
     this.resolver = new CanonicalResolver();
     this.telemetry = new Telemetry({ onEvent: e => this._renderDebug(e) });
     this.stateMachine = new LensStateMachine(({ state, detail }) => this._renderState(state, detail));
-    this.marketOverlay = new MarketOverlay(resultOverlay, { onOpen: card => window.openCard?.(card.id, card.lang || this.lang) });
+    this.marketOverlay = new MarketOverlay(resultOverlay, { onOpen: card => window.openCard?.(card.id, card.lang || this.lang), onDismiss: () => this.dismissResult() });
     this.running = false;
     this.paused = false;
     this.frameHandle = null;
@@ -388,7 +388,7 @@ export class LensRuntime {
         temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction,
         temporalPending: temporal.pendingSwitch, temporalEpoch: temporal.epoch,
       });
-      if (c.locked) { this._observePossibleChange(top, margin); return; }
+      if (c.locked) { if (this._checkPresence(c, candidates)) this._observePossibleChange(top, margin); return; }
       this._evaluateEvidence();
       if (forced && !c.locked && frame.quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, frame.canvas);
     } catch (error) {
@@ -547,7 +547,7 @@ export class LensRuntime {
       const { byLang, languages: _l, ...printing } = row || id;
       c.locked.identity = { ...id, ...printing, lang, languageUnverified: false, languageCandidates: undefined };
       this.telemetry.emit('LOCK_LANGUAGE_PROVEN', { id: c.locked.id, lang });
-      this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
+      if (!c.locked.dismissed) this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
     }
   }
 
@@ -611,6 +611,41 @@ export class LensRuntime {
     return true;
   }
 
+  /**
+   * After a lock: is the identified card still the one in the image? The locked printing (or one of
+   * its artwork twins) must stay among the 3 best matches; otherwise, after `presenceMissVotes`
+   * frames, the result is released and scanning starts again. Returns false when released.
+   */
+  _checkPresence(c, candidates) {
+    if (!this.policy.calibratedInstant) return true;
+    const group = c.locked.group || [c.locked.id];
+    const present = candidates.slice(0, 3).some(k => group.includes(k.id) && k.score >= (this.policy.instantScore ?? 0.8) - 0.15);
+    c.presenceMiss = present ? 0 : (c.presenceMiss || 0) + 1;
+    if (c.presenceMiss < (this.policy.presenceMissVotes ?? 2)) return true;
+    this.releaseLock('card_left_image');
+    return false;
+  }
+
+  /** Release the identified card (left the image): result hidden, a new analysis starts. */
+  releaseLock(reason) {
+    const c = this.context; if (!c?.locked) return;
+    this.telemetry.emit('LOCK_RELEASED', { id: c.locked.id, reason });
+    this.marketOverlay.clear();
+    const track = this.tracker.bumpGeneration();
+    if (track) {
+      this._newContext(track, { resetState: true, reason });
+      for (const s of [LENS_STATES.TRACKING, LENS_STATES.ANALYZING]) this._safeTransition(s, { reason });
+    } else { this.context = null; this.stateMachine.reset({ reason }); }
+    this._hud(true);
+  }
+
+  /** The user closed the result: hide it, keep the identification (green light) until the card changes. */
+  dismissResult() {
+    const c = this.context;
+    if (c?.locked) { c.locked.dismissed = true; this.telemetry.emit('RESULT_DISMISSED', { id: c.locked.id }); }
+    this.marketOverlay.clear();
+  }
+
   _observePossibleChange(candidate, margin) {
     const c = this.context;
     if (!c?.locked || !c.changeDetector) return;
@@ -629,7 +664,7 @@ export class LensRuntime {
     if (result.action === 'SAME' || result.action === 'INSUFFICIENT' || result.action === 'RESET') {
       if (this.stateMachine.state === LENS_STATES.CHANGE_PENDING) {
         if (this._safeTransition(LENS_STATES.LOCKED, { id: c.locked.id, reason: result.reason })) {
-          this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
+          if (!c.locked.dismissed) this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
           this._hud(true);
         }
       }

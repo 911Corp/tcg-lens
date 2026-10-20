@@ -92,6 +92,14 @@
     overlay.innerHTML = html; overlay.hidden = false;
     clearTimeout(hideTimer);
     overlay.querySelector('[data-close]')?.addEventListener('click', hide);
+    // Swipe down / sideways to dismiss, like the card result.
+    const sheet = overlay.querySelector('.sheet');
+    if (sheet) {
+      let x0 = null, y0 = null;
+      sheet.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+      sheet.addEventListener('touchmove', e => { if (y0 == null) return; const dy = Math.max(0, e.touches[0].clientY - y0), dx = e.touches[0].clientX - x0; sheet.style.transform = Math.abs(dx) > dy ? `translateX(${dx}px)` : `translateY(${dy}px)`; }, { passive: true });
+      sheet.addEventListener('touchend', e => { if (y0 == null) return; const t = e.changedTouches[0]; const dy = t.clientY - y0, dx = t.clientX - x0; x0 = y0 = null; if (dy > 60 || Math.abs(dx) > 90) hide(); else sheet.style.transform = ''; });
+    }
   }
   function hide() { overlay.hidden = true; overlay.innerHTML = ''; shownCode = null; if (runtime()) runtime().sealedMode = false; }
   window.hideSealedOverlay = hide;

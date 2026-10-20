@@ -29,7 +29,7 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
     number: total ? `${number}/${/^\d+$/.test(number) ? String(total).padStart(number.length, '0') : total}` : number,
     // Language only when proven; otherwise say so (FR and EN share the printing).
     language: identity.languageUnverified
-      ? `Langue à confirmer${identity.languageCandidates?.length > 1 ? ` (${identity.languageCandidates.map(l => l.toUpperCase()).join(' / ')})` : ''}`
+      ? (identity.languageCandidates?.length > 1 ? `${identity.languageCandidates.map(l => l.toUpperCase()).join('/')} ?` : 'Langue ?')
       : LANG[identity.lang || c.lang] || (identity.lang || '').toUpperCase(),
     variant: identity.variantProven ? (identity.variantLabel || null) : null,
     confidence: Math.round((confidence || 0) * 100),
@@ -43,7 +43,7 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
 }
 
 export class MarketOverlay {
-  constructor(root, { onOpen = null } = {}) { this.root = root; this.onOpen = onOpen; this.current = null; this.seq = 0; }
+  constructor(root, { onOpen = null, onDismiss = null } = {}) { this.root = root; this.onOpen = onOpen; this.onDismiss = onDismiss; this.current = null; this.seq = 0; }
 
   clear() { this.seq++; this.current = null; if (this.root) { this.root.hidden = true; this.root.innerHTML = ''; this.root.classList.remove('is-dim'); } }
 
@@ -71,32 +71,47 @@ export class MarketOverlay {
     if (!this.root) return;
     this.root.hidden = false;
     this.root.classList.remove('is-dim');
+    // v0.3.7: three short lines over the live camera — name + price, set · number · language, trend.
+    const meta = [m.setName, m.number, m.language, m.variant].filter(Boolean).map(esc).join(' · ');
     const signals = [
-      m.trend ? `<li><span class="sig-key">Tendance</span><span class="sig-val">${m.trend.arrow} ${esc(m.trend.text)}</span></li>` : '',
-      `<li><span class="sig-key">Heat${m.heat?.beta ? ' <i>bêta</i>' : ''}</span><span class="sig-val">${m.heat ? `${esc(m.heat.label)} ${m.heat.score}` : 'Non disponible'}</span></li>`,
-      `<li><span class="sig-key">Offre / demande</span><span class="sig-val">${m.supplyDemand ? esc(m.supplyDemand) : 'Non disponible'}</span></li>`,
-    ].join('');
+      m.trend ? `${m.trend.arrow} ${esc(m.trend.text)}` : null,
+      m.heat ? `Heat ${m.heat.score}${m.heat.beta ? ' β' : ''}` : null,
+      m.priceSource ? esc(m.priceSource) : null,
+    ].filter(Boolean).join(' · ');
+    const price = m.loadingMarket ? '<span class="sheet-amount is-loading">&nbsp;</span>' : `<span class="sheet-amount${m.price ? '' : ' is-missing'}">${m.price ? esc(m.price) : 'Prix n.d.'}</span>`;
     this.root.innerHTML = `
-      <button class="sheet" type="button" aria-label="Ouvrir la fiche de ${esc(m.name)}">
-        <span class="sheet-foil" aria-hidden="true"></span>
-        <span class="sheet-head">
-          <span class="sheet-name">${esc(m.name)}</span>
-          <span class="sheet-confidence" title="Confiance de l’identification"><b>${m.confidence}</b> %</span>
-        </span>
-        <span class="sheet-id">
-          <span class="sheet-set">${esc(m.setName)}</span>
-          <span class="sheet-number">${esc(m.number)}</span>
-          <span class="sheet-lang">${esc(m.language)}</span>
-          ${m.variant ? `<span class="sheet-lang">${esc(m.variant)}</span>` : ''}
-        </span>
-        <span class="sheet-price ${m.loadingMarket ? 'is-loading' : m.price ? '' : 'is-missing'}">
-          <span class="sheet-amount">${m.loadingMarket ? '&nbsp;' : m.price ? esc(m.price) : 'Prix non disponible'}</span>
-          ${m.priceSource ? `<span class="sheet-source">tendance ${esc(m.priceSource)}</span>` : ''}
-        </span>
-        ${m.loadingMarket ? '' : `<ul class="sheet-signals">${signals}</ul>`}
-        <span class="sheet-open">Voir la fiche complète</span>
-      </button>`;
-    this.root.querySelector('.sheet')?.addEventListener('click', () => this.onOpen?.(this.current?.id ? this.current : identity));
+      <div class="sheet lite" role="group" aria-label="${esc(m.name)}">
+        <span class="sheet-grab" aria-hidden="true"></span>
+        <button class="sheet-x" type="button" aria-label="Masquer le résultat">×</button>
+        <button class="sheet-main" type="button" aria-label="Ouvrir la fiche de ${esc(m.name)}">
+          <span class="sheet-row"><span class="sheet-name">${esc(m.name)}</span>${price}</span>
+          <span class="sheet-meta">${meta}</span>
+          ${signals ? `<span class="sheet-signal">${signals}</span>` : ''}
+        </button>
+      </div>`;
+    const sheet = this.root.querySelector('.sheet');
+    sheet.querySelector('.sheet-main').addEventListener('click', () => this.onOpen?.(this.current?.id ? this.current : identity));
+    sheet.querySelector('.sheet-x').addEventListener('click', e => { e.stopPropagation(); this.dismiss(); });
+    // Swipe down (or sideways) to dismiss.
+    let x0 = null, y0 = null;
+    sheet.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+    sheet.addEventListener('touchmove', e => {
+      if (y0 == null) return;
+      const dy = Math.max(0, e.touches[0].clientY - y0), dx = e.touches[0].clientX - x0;
+      sheet.style.transform = `translate(${Math.abs(dx) > dy ? dx : 0}px, ${Math.abs(dx) > dy ? 0 : dy}px)`;
+      sheet.style.opacity = String(Math.max(0.2, 1 - Math.max(dy, Math.abs(dx)) / 220));
+    }, { passive: true });
+    sheet.addEventListener('touchend', e => {
+      if (y0 == null) return;
+      const t = e.changedTouches[0], dy = t.clientY - y0, dx = t.clientX - x0;
+      x0 = y0 = null;
+      if (dy > 60 || Math.abs(dx) > 90) this.dismiss(); else { sheet.style.transform = ''; sheet.style.opacity = ''; }
+    });
+  }
+
+  /** User closed the result. */
+  dismiss() {
+    if (this.onDismiss) this.onDismiss(); else this.clear();
   }
 }
 

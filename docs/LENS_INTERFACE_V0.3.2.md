@@ -194,3 +194,9 @@ and read by the app from `deep-index.json` (0.86 / 0.04). Queries average the la
 **E2E (headless, CPU):** 30th FR card instant (4.2 s from page open incl. model load; was 20 s), 30th JA
 (M6a) instant (4.2 s), 30th Classic Collection Charizard → honest AMBIGUOUS. Tests 83/83, benchmark 19/19,
 FCIR 0.
+
+## v0.3.7 — résultat éphémère et affichage allégé
+
+- **Disparition automatique** : une fois la carte identifiée, la re-vérification visuelle continue toutes les 350 ms. Si la carte verrouillée (ou un jumeau du même groupe) sort des 3 meilleures correspondances deux fois de suite (`presenceMissVotes`), le verrou est libéré (`LOCK_RELEASED card_left_image`), la fiche disparaît et le scan reprend (feu rouge/orange). Mesuré en E2E : ≈ 1,7 s après le retrait de la carte.
+- **Fermeture manuelle** : bouton ✕, glissement vers le bas (> 60 px) ou sur le côté (> 90 px). L'identification est conservée (feu vert) mais la fiche ne revient pas tant que la carte reste en place ; une nouvelle carte (ou la même reposée) relance l'affichage.
+- **Fiche compacte translucide** (`.sheet.lite`) : verre dépoli ~34 %, 3 lignes — nom + prix, set · numéro · langue (`FR/EN ?` si non prouvée), tendance · Heat · source. Même geste de fermeture sur la pop-up des produits scellés ; dock, voyant et bulle d'aide plus transparents.

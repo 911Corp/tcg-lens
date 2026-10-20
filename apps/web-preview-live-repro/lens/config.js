@@ -75,6 +75,11 @@ export const CALIBRATED_POLICY = Object.freeze({
   changeVisualScore: 0.8,
   changeVisualMargin: 0.06,
   provisionalVisualScore: 0.7,
+  // v0.3.7: re-check the identified card often (cheap with the calibrated index), confirm a change in 2
+  // frames, and release the result when the card left the image.
+  lockedVisualIntervalMs: 350,
+  changeVotes: 2,
+  presenceMissVotes: 2,
 });
 
 export function clamp(value, min, max) {

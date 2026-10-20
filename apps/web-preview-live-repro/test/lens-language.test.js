@@ -153,5 +153,5 @@ test('unreadable language: lock after the grace delay with language unverified, 
 import { lockedSheetModel } from '../lens/MarketOverlay.js';
 test('an unverified language is shown as such, never guessed', () => {
   const m = lockedSheetModel({ id: 'me05-001', name: 'Tropius', localId: '001', printedTotal: 84, lang: null, languageUnverified: true, languageCandidates: ['fr', 'en'] }, null, 0.95);
-  assert.equal(m.language, 'Langue à confirmer (FR / EN)');
+  assert.equal(m.language, 'FR/EN ?');
 });

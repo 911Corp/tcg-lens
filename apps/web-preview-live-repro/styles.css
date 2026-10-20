@@ -335,3 +335,31 @@ video::-webkit-media-controls-overlay-play-button { display: none !important; -w
 
 .diag-text { margin: 0; white-space: pre-wrap; font: inherit; }
 .diag-share { margin-top: 8px; min-height: 38px; width: 100%; border: 0; border-radius: 999px; background: var(--chalk); color: #0d0f12; font: 600 var(--t-15)/1 var(--display); }
+
+/* ------------------------------------------------------------------ v0.3.7: lighter, frosted overlays */
+.lens-result-overlay { bottom: calc(var(--nav-h) + 22px + var(--safe-b)); width: min(460px, calc(100% - 20px)); }
+.lens-result-overlay .sheet { position: relative; display: block; text-align: left; padding: 14px 46px 12px 16px; border-radius: 20px;
+  background: rgba(12,14,18,.34) !important; border: 1px solid rgba(255,255,255,.14) !important;
+  backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: 0 14px 34px -14px rgba(0,0,0,.5); transition: transform .2s var(--ease), opacity .2s; touch-action: pan-y; }
+.lens-result-overlay .sheet-foil { height: 2px; opacity: .8; border-radius: 20px 20px 0 0; }
+.sheet .sheet-grab { position: absolute; top: 6px; left: 50%; width: 32px; height: 4px; margin-left: -16px; border-radius: 2px; background: rgba(255,255,255,.28); }
+.sheet-x { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); font: 400 20px/1 var(--text); padding: 0; }
+.sheet-main { all: unset; display: grid; gap: 3px; width: 100%; cursor: pointer; }
+.sheet-main:focus-visible { outline: 2px solid var(--chalk); outline-offset: 4px; border-radius: 8px; }
+.sheet-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sheet.lite .sheet-name { font: 600 21px/1.15 var(--display); letter-spacing: -.005em; overflow-wrap: anywhere; }
+.sheet.lite .sheet-amount { font: 600 21px/1 var(--display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sheet.lite .sheet-amount.is-missing { font-size: 14px; font-weight: 500; color: rgba(255,255,255,.6); }
+.sheet.lite .sheet-amount.is-loading { width: 64px; height: 18px; border-radius: 6px; background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.18), rgba(255,255,255,.08)); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.sheet-meta { font-size: 13px; color: rgba(255,255,255,.74); }
+.sheet-signal { font-size: 12px; color: rgba(255,255,255,.56); }
+.sealed-overlay .sealed-sheet { padding: 14px 46px 14px 14px; }
+.sealed-x { top: 10px; right: 10px; width: 28px; height: 28px; font-size: 20px; background: rgba(255,255,255,.12); }
+.sealed-actions button.secondary { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.16); }
+.tl { background: rgba(10,12,15,.26); }
+.tl-tip { background: rgba(10,12,15,.38); }
+.nav { background: rgba(10,12,15,.26) !important; }
+.camera .icon-btn { background: rgba(10,12,15,.26); }
+.track-layer[data-tone="locked"] .track-edge { stroke-width: 2.5; }

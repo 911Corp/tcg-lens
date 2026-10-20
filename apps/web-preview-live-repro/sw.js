@@ -1,7 +1,7 @@
 // Service worker (v9). Shell: network first (fresh code), cache fallback offline.
 // Recognition assets — calibrated index, catalogue metadata, AI model and OCR/barcode engines (all
 // versioned URLs) — are cache-first, so the scanner starts instantly from the second launch.
-const SHELL_CACHE = 'tcg-lens-shell-v10';
+const SHELL_CACHE = 'tcg-lens-shell-v11';
 const ASSET_CACHE = 'tcg-lens-assets-v2';
 const SHELL = ['/', '/index.html', '/styles.css', '/app-1.js', '/app-2.js', '/app-3.js', '/app-4.js', '/sealed.js', '/app-shell.js', '/lens/index.js', '/manifest.json', '/icon.svg',
   '/fonts/barlow-semi-condensed-latin-600-normal.woff2', '/fonts/barlow-semi-condensed-latin-700-normal.woff2', '/fonts/barlow-latin-400-normal.woff2', '/fonts/barlow-latin-500-normal.woff2'];
