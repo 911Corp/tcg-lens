@@ -13,6 +13,7 @@ export function cosine(a, b) {
 }
 
 export class VisualEmbeddingAdapter {
+  static BATCH = 8;
   constructor() {
     this.model = null;
     this.modelPromise = null;
@@ -29,6 +30,12 @@ export class VisualEmbeddingAdapter {
         try { await window.tf.setBackend('webgl'); } catch {}
         await window.tf.ready();
         this.model = await window.mobilenet.load({ version: 2, alpha: 0.5 });
+        // Warm-up: WebGL compiles shaders per input shape on first use (1–2 s on phones). Do it now
+        // for the two shapes used at scan time (single query, fixed batch of references).
+        try {
+          const tf = window.tf;
+          for (const n of [1, VisualEmbeddingAdapter.BATCH]) { const t = tf.tidy(() => this.model.infer(tf.zeros([n, 224, 224, 3]), true)); await t.data(); t.dispose(); }
+        } catch {}
         return true;
       } catch (error) {
         console.warn('TCG Lens embedding model unavailable', error);
@@ -88,10 +95,17 @@ export class VisualEmbeddingAdapter {
     if (!(await this.ensureModel())) return canvases.map(() => null);
     const tf = window.tf;
     let out = null;
+    // Fixed batch size (padded) so WebGL never recompiles shaders for a new shape mid-scan.
+    const B = VisualEmbeddingAdapter.BATCH;
+    if (canvases.length > B) {
+      const head = await this.embedBatch(canvases.slice(0, B));
+      return head.concat(await this.embedBatch(canvases.slice(B)));
+    }
+    const padded = canvases.concat(Array(B - canvases.length).fill(canvases[0]));
     try {
-      out = tf.tidy(() => this.model.infer(tf.stack(canvases.map(c => tf.image.resizeBilinear(tf.cast(tf.browser.fromPixels(c), 'float32'), [224, 224], true))), true));
+      out = tf.tidy(() => this.model.infer(tf.stack(padded.map(c => tf.image.resizeBilinear(tf.cast(tf.browser.fromPixels(c), 'float32'), [224, 224], true))), true));
       const data = await out.data();
-      const dims = data.length / canvases.length;
+      const dims = data.length / padded.length;
       return canvases.map((_, i) => normalize(data.subarray(i * dims, (i + 1) * dims)));
     } finally { out?.dispose?.(); }
   }

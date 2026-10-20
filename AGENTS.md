@@ -21,7 +21,7 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.2): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 73/73,
+Expected baseline (v0.3.3): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 75/75,
 benchmark 14/14 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
@@ -36,7 +36,8 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
 
 ## Lens interface rules (v0.3.2)
 - All user-facing scanner text comes from `lens/LensHud.js` (`describeHud`): plain French, actionable, never machine state names.
-- The HUD holds a message ≥ 700 ms; the outline follows the tracked quad; holo outline only when LOCKED.
+- The scanner status is a traffic light (red/orange/green); text only when the user must act or taps it. Messages hold ≥ 700 ms; the outline follows the tracked quad; holo outline only when LOCKED.
+- Card detection is the straight-edge rectangle search (`lens/EdgeRectDetector.js`); keep its synthetic benchmark ≥ 80 % correct and 0 detections on empty tables.
 - No Identify button, no candidate picker. The app opens directly on the live scanner; catalogue, collection,
   settings, help and card details are panels over the camera, never separate pages.
 - No language choice before scanning (v0.3.2): the precomputed visual index (`data/visual-index-*`, built by

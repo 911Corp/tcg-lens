@@ -14,7 +14,8 @@ export const DEFAULT_POLICY = Object.freeze({
   detectorIntervalMs: 125,
   visualIntervalMs: 300,
   lockedVisualIntervalMs: 1150,
-  ocrIntervalMs: 1600,
+  // OCR runs in a worker thread: chain passes back to back (never two at once).
+  ocrIntervalMs: 600,
   ocrExactVotes: 2,
   ocrNameVotes: 2,
   ocrMaxObservations: 5,

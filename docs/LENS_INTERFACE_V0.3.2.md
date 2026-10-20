@@ -71,3 +71,29 @@ printing is the row of the proven language. A fixed scan language remains in Ré
 FR Tropius me05-001 locked as *Français* without any language choice; EN Tropius language proven *Anglais*;
 JA Arceus V S9-112 language proven *Japonais*, held AMBIGUOUS (near-identical JA sibling, margin < 0.06).
 Benchmark 14/14, FCIR 0. Real-device latency still has to be measured.
+
+## v0.3.3 — Status light, reliable detection, readable numbers
+
+**Screen.** The text box is gone. A three-lamp status light sits at the top centre: red = no card / not
+recognised (dim red while waiting), orange = analysing (pulsing) or action needed, green = identified. A short
+tip appears under it only when the user must act (glare, too far, camera refused with "Réessayer"); a tap shows
+the current explanation; a long press opens the diagnostics panel (camera size, catalogue, detection rate and
+time, tracking, visual query time and top score, OCR time, language, last decision).
+
+**Detection (`lens/EdgeRectDetector.js`).** Card borders are searched as straight lines (oriented Sobel
+votes for ±12°, left/right pairs, height from the 63:88 ratio so an occluded border does not matter, side
+coverage + line-contrast verification, outer edge preferred over the inner frame, per-side refinement).
+Synthetic benchmark (200 scenes: plain, light, wood, fabric, busy table with other cards, hand, glare, noise,
+blur): correct corners 81 % vs 43 % for the former blob detector (busy table 73 % vs 0 %); no detection on
+empty tables (fabric grid included). While tracking, only ±3° around the card's angle is searched. The blob
+detector remains a fallback. Rectification copies only the card's bounding box.
+
+**Printed number.** A digits-only reader (sparse text, whitelist `0-9/`) reads the two bottom corners in
+parallel; implausible reads (total > 400, number > total + 150…) are dropped because near-identical frames
+repeat the same misreading.
+
+**Speed.** Shader warm-up for the deep model at load, fixed reference batch (no WebGL recompiles), OCR passes
+chained (600 ms), a language read with ≥ 4 distinct markers of one language and none of another counts twice.
+
+**End-to-end (headless Chromium, CPU only — not a phone):** tilted FR card on a busy table, tilted FR card on
+wood and EN card all lock on the right printing and language. Tests 75/75, benchmark 14/14, FCIR 0.

@@ -111,3 +111,20 @@ test('an exact printed number consensus lowers only the visual score bar, never 
   assert.notEqual(fusion.evaluate({ temporal: temporal({ score: 0.93, margin: 0.03 }), visual, ocr }).decision, 'LOCK', 'margin bar unchanged');
   assert.notEqual(fusion.evaluate({ temporal: temporal({ score: 0.88, margin: 0.07 }), visual, ocr }).decision, 'LOCK');
 });
+
+test('one read with four or more markers of a single language counts as two', () => {
+  const r = detectCardLanguage('Base Tropius PV 110 Regardez les cartes de votre deck avec votre main Faiblesse Retraite', { languages: ['fr', 'en'] });
+  assert.equal(r.lang, 'fr'); assert.equal(r.strong, true);
+  const lc = new LanguageConsensus();
+  assert.equal(lc.observe('me05-001', 'fr', ['fr', 'en'], true), 'fr');
+  const weak = detectCardLanguage('PV 110 Faiblesse', { languages: ['fr', 'en'] });
+  assert.equal(weak.strong, false);
+  lc.observe('me05-001', 'en', ['fr', 'en']);
+  assert.equal(lc.resolved('me05-001', ['fr', 'en']), null, 'a disagreeing read still blocks');
+});
+
+import { plausibleCollector } from '../lens/OCRAdapter.js';
+test('digits-only collector reads are kept only when they look like a printed number/total', () => {
+  for (const ok of ['001/084', '0001/084', '199/165', '25/102', '230/198']) assert.equal(plausibleCollector(ok), true, ok);
+  for (const bad of ['0071/0840', '2', '20', '001/0840', '000/084', '400/084', '']) assert.equal(plausibleCollector(bad), false, bad);
+});

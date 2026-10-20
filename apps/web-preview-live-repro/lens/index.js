@@ -5,8 +5,9 @@ let runtime = null;
 
 function ensureRuntime() {
   if (runtime) return runtime;
-  const debug = new URLSearchParams(location.search).get('debug') === '1' ? $('#lensDebug') : null;
-  if (debug) debug.hidden = false;
+  // Diagnostics panel: long press on the status light (or ?debug=1).
+  const debug = $('#lensDebug');
+  if (new URLSearchParams(location.search).get('debug') === '1') debug.hidden = false;
   runtime = new LensRuntime({
     video: $('#camera'),
     trackLayer: $('#trackLayer'),

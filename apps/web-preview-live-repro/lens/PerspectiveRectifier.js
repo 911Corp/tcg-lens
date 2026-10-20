@@ -50,11 +50,19 @@ export class PerspectiveRectifier {
     }
     this.lastValidation = validateCardQuad(quad, video.videoWidth, video.videoHeight);
     if (!this.lastValidation.valid) return null;
+    // v0.3.3: copy only the card's bounding box, at ~2× the output resolution, instead of the whole
+    // camera frame (a 1080×1920 getImageData every tick was the costliest step on phones).
+    const VW = video.videoWidth, VH = video.videoHeight;
+    const xs = quad.map(p => p.x), ys = quad.map(p => p.y);
+    const bx = Math.max(0, Math.floor(Math.min(...xs)) - 2), by = Math.max(0, Math.floor(Math.min(...ys)) - 2);
+    const bw = Math.min(VW, Math.ceil(Math.max(...xs)) + 2) - bx, bh = Math.min(VH, Math.ceil(Math.max(...ys)) + 2) - by;
+    const k = Math.min(1, (this.width * 2) / Math.max(1, bw));
     const src = this.source;
-    src.width = video.videoWidth; src.height = video.videoHeight;
+    src.width = Math.max(1, Math.round(bw * k)); src.height = Math.max(1, Math.round(bh * k));
     const sctx = src.getContext('2d', { willReadFrequently: true });
-    sctx.drawImage(video, 0, 0, src.width, src.height);
+    sctx.drawImage(video, bx, by, bw, bh, 0, 0, src.width, src.height);
     const sourceData = sctx.getImageData(0, 0, src.width, src.height);
+    quad = quad.map(p => ({ x: (p.x - bx) * k, y: (p.y - by) * k }));
     const out = document.createElement('canvas'); out.width = this.width; out.height = this.height;
     const octx = out.getContext('2d');
     const output = octx.createImageData(out.width, out.height);

@@ -30,6 +30,7 @@ export class TrackManager {
     this.track.box = { x: old.x * (1 - k) + d.box.x * k, y: old.y * (1 - k) + d.box.y * k, w: old.w * (1 - k) + d.box.w * k, h: old.h * (1 - k) + d.box.h * k };
     this.track.quad = blendQuad(this.track.quad, d.quad, k);
     this.track.lastSeen = at;
+    if (Number.isFinite(d.angle)) this.track.angle = d.angle;
     this.track.hits++;
     this.track.stable = this.track.hits >= this.minStableHits;
     return this.track;
@@ -37,7 +38,7 @@ export class TrackManager {
 
   _newTrack(d, at) {
     this.generation++;
-    this.track = { id: this.nextId++, generation: this.generation, box: { ...d.box }, quad: d.quad?.map(p => ({ ...p })) || null, hits: 1, stable: false, lastSeen: at };
+    this.track = { id: this.nextId++, generation: this.generation, box: { ...d.box }, quad: d.quad?.map(p => ({ ...p })) || null, hits: 1, stable: false, lastSeen: at, angle: Number.isFinite(d.angle) ? d.angle : null };
     return this.track;
   }
 }

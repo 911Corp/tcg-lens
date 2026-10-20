@@ -123,21 +123,43 @@ export function describeHud(input = {}) {
   return { tone: 'work', key: 'analyze', title: 'Comparaison avec le catalogue', hint: idx?.text || 'Quelques secondes.', progress: 0.25 + votes * 0.35 };
 }
 
+/** Traffic-light lamp for a HUD tone. */
+export const LAMP = Object.freeze({ idle: 'red', fail: 'red', work: 'orange', attention: 'orange', locked: 'green' });
+
+/**
+ * v0.3.3 status light: three lamps (red / orange / green) instead of a text box. Text appears only
+ * when the user must act (attention, failure, camera error) or after a tap on the light; a long
+ * press toggles the diagnostics panel.
+ */
 export class HudView {
-  constructor(root, { minHoldMs = 700, now = () => performance.now(), schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id) } = {}) {
+  constructor(root, { minHoldMs = 700, now = () => performance.now(), schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), onLongPress = null } = {}) {
     this.root = root;
     this.minHoldMs = minHoldMs;
     this.now = now; this.schedule = schedule; this.cancel = cancel;
     this.current = null; this.shownAt = -Infinity; this.pending = null; this.timer = null;
+    this.revealUntil = 0; this.revealTimer = null;
     if (root) {
-      root.innerHTML = '<div class="hud-meter" aria-hidden="true"><span></span></div><p class="hud-title"></p><p class="hud-hint"></p><button type="button" class="hud-action" hidden></button>';
-      root.querySelector('.hud-action').addEventListener('click', e => {
+      root.innerHTML = '<button type="button" class="tl" aria-describedby="tlTip"><span class="tl-lamp" data-lamp="red"></span><span class="tl-lamp" data-lamp="orange"></span><span class="tl-lamp" data-lamp="green"></span></button>'
+        + '<div class="tl-tip" id="tlTip" role="status" aria-live="polite" hidden><b class="tl-title"></b><span class="tl-hint"></span><button type="button" class="tl-action" hidden></button></div>';
+      const light = root.querySelector('.tl');
+      let pressTimer = null, long = false;
+      light.addEventListener('pointerdown', () => { long = false; pressTimer = setTimeout(() => { long = true; onLongPress?.(); }, 650); });
+      const end = () => { clearTimeout(pressTimer); };
+      light.addEventListener('pointerup', end); light.addEventListener('pointerleave', end);
+      light.addEventListener('click', () => { if (long) return; this.reveal(3500); });
+      root.querySelector('.tl-action').addEventListener('click', e => {
         const id = e.currentTarget.dataset.action;
         if (id) root.dispatchEvent(new CustomEvent('tcglens:action', { bubbles: true, detail: { id } }));
       });
-      root.setAttribute('role', 'status');
-      root.setAttribute('aria-live', 'polite');
     }
+  }
+
+  /** Show the explanation of the current state for a few seconds (tap on the light). */
+  reveal(ms = 3500) {
+    this.revealUntil = this.now() + ms;
+    if (this.revealTimer) this.cancel(this.revealTimer);
+    this.revealTimer = this.schedule(() => { this.revealTimer = null; if (this.current) this._paint(this.current, false); }, ms + 20);
+    if (this.current) this._paint(this.current, true);
   }
 
   /** Immediate tones (locked, idle, fail) replace instantly; others respect the hold time. */
@@ -164,20 +186,26 @@ export class HudView {
     this._paint(model, true);
   }
 
+  /** Text is shown only when the user has something to do, or asked (tap). */
+  tipVisible(model) {
+    if (!model) return false;
+    if (model.action) return true;
+    if (this.now() < this.revealUntil) return model.tone !== 'locked';
+    return (model.tone === 'attention' || model.tone === 'fail') && model.key !== 'unknown-index';
+  }
+
   _paint(model, changed) {
     this.current = { ...model, key: model.key };
     if (!this.root) return;
     this.root.dataset.tone = model.tone;
-    this.root.hidden = model.tone === 'locked';
-    const title = this.root.querySelector('.hud-title');
-    const hint = this.root.querySelector('.hud-hint');
-    const meter = this.root.querySelector('.hud-meter');
-    if (changed) { title.textContent = model.title; }
-    hint.textContent = model.hint || '';
-    hint.hidden = !model.hint;
-    meter.hidden = model.progress == null;
-    const action = this.root.querySelector('.hud-action');
-    if (action) { action.hidden = !model.action; action.textContent = model.action?.label || ''; action.dataset.action = model.action?.id || ''; }
-    if (model.progress != null) meter.firstElementChild.style.transform = `scaleX(${clamp01(model.progress)})`;
+    this.root.dataset.lamp = LAMP[model.tone] || 'red';
+    const light = this.root.querySelector('.tl');
+    light.setAttribute('aria-label', `${model.title}${model.hint ? `. ${model.hint}` : ''}`);
+    const tip = this.root.querySelector('.tl-tip');
+    tip.hidden = !this.tipVisible(model);
+    tip.querySelector('.tl-title').textContent = model.title;
+    const hint = tip.querySelector('.tl-hint'); hint.textContent = model.hint || ''; hint.hidden = !model.hint;
+    const action = tip.querySelector('.tl-action');
+    action.hidden = !model.action; action.textContent = model.action?.label || ''; action.dataset.action = model.action?.id || '';
   }
 }

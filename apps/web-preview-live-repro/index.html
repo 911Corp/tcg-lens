@@ -34,12 +34,12 @@
     <video id="camera" autoplay playsinline muted></video>
     <div class="camera-vignette" aria-hidden="true"></div>
     <header class="camera-top">
-      <span class="brand on-camera"><span class="brandmark" aria-hidden="true"></span><span>TCG Lens</span></span>
+      <span class="brand on-camera" aria-label="TCG Lens"><span class="brandmark" aria-hidden="true"></span></span>
+      <div class="status-light" id="lensHud"></div>
       <button class="icon-btn" data-go="legend" aria-label="Comment lire le scanner"><svg><use href="#i-info"/></svg></button>
       <span id="livePill" hidden></span>
     </header>
     <div class="track-layer" id="trackLayer" data-visible="false" aria-hidden="true"></div>
-    <div class="hud" id="lensHud"></div>
     <div class="lens-result-overlay" id="lensResultOverlay" hidden></div>
     <div class="lens-debug" id="lensDebug" hidden></div>
   </section>
@@ -105,11 +105,11 @@
     <div class="content-shell">
       <header class="topbar"><h2>Lire le scanner</h2><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-close"/></svg></button></header>
       <ol class="legend">
-        <li data-tone="work"><b>Le cadre se referme</b><p>Les coins s’allongent à mesure que les images concordent avec le catalogue.</p></li>
-        <li data-tone="attention"><b>Message ambre</b><p>Le Lens a besoin de vous : rapprochez la carte, évitez un reflet, ou rendez le numéro lisible.</p></li>
-        <li data-tone="locked"><b>Contour holographique</b><p>La carte est identifiée : nom, extension, numéro et prix s’affichent. Touchez la fiche pour le détail.</p></li>
-        <li data-tone="work"><b>Langue détectée seule</b><p>Pas besoin de choisir : français, anglais et japonais sont comparés en même temps. Si une carte existe dans plusieurs langues, le Lens lit le texte imprimé (PV ou HP, nom) avant de valider.</p></li>
-        <li data-tone="fail"><b>Carte non reconnue</b><p>Aucune correspondance fiable. Essayez sous un autre angle, sans reflet.</p></li>
+        <li data-tone="fail"><b>Voyant rouge</b><p>Aucune carte dans l’image, ou carte non reconnue. Visez une carte, les quatre coins visibles.</p></li>
+        <li data-tone="attention"><b>Voyant orange</b><p>Analyse en cours : les coins du cadre s’allongent à mesure que les images concordent. Si un conseil s’affiche (reflet, trop loin…), suivez-le.</p></li>
+        <li data-tone="locked"><b>Voyant vert et contour holographique</b><p>Carte identifiée : nom, extension, numéro, langue et prix s’affichent. Touchez la fiche pour le détail.</p></li>
+        <li data-tone="work"><b>Langue détectée seule</b><p>Français, anglais et japonais sont comparés en même temps ; le texte imprimé (PV ou HP, nom, écriture japonaise) confirme la langue avant de valider.</p></li>
+        <li data-tone="work"><b>Touchez le voyant</b><p>Il explique ce qu’il se passe. Un appui long affiche le diagnostic technique.</p></li>
       </ol>
       <p class="meta-line">Le Heat (bêta) n’utilise aujourd’hui que l’évolution des prix ; les ventes et le stock ne sont pas encore disponibles.</p>
     </div>

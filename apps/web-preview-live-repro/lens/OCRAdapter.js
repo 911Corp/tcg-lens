@@ -7,6 +7,7 @@ export class OCRAdapter {
 
   /** One persistent worker per Tesseract language (each runs in its own thread). */
   ensureWorker(lang) {
+    if (lang === 'digits') return this._digitsWorker();
     const tessLang = lang === 'ja' ? 'jpn' : lang === 'fr' ? 'fra' : 'eng';
     if (!this.workers.has(tessLang)) {
       this.workers.set(tessLang, (async () => {
@@ -16,6 +17,39 @@ export class OCRAdapter {
       })().catch(() => { this.workers.delete(tessLang); return null; }));
     }
     return this.workers.get(tessLang);
+  }
+
+  /** Separate reader restricted to digits and "/" (sparse text: the zone also holds the illustrator line): the printed collector number. */
+  _digitsWorker() {
+    if (!this.workers.has('digits')) {
+      this.workers.set('digits', (async () => {
+        await this._loadTesseract();
+        if (!window.Tesseract?.createWorker) return null;
+        const w = await window.Tesseract.createWorker('eng', 1, { logger: () => {} });
+        await w.setParameters({ tessedit_char_whitelist: '0123456789/', tessedit_pageseg_mode: '11' });
+        return w;
+      })().catch(() => { this.workers.delete('digits'); return null; }));
+    }
+    return this.workers.get('digits');
+  }
+
+  /**
+   * v0.3.3: the collector number ("001/084") is tiny; read it from the two bottom corners only,
+   * enlarged, with the digits-only reader. Runs in parallel with the text readers.
+   */
+  async _numberRead(canvas) {
+    try {
+      const w = await this._digitsWorker(); if (!w) return '';
+      const out = [];
+      for (const [x, wid] of [[0, 0.5], [0.5, 0.5]]) {
+        const z = this._zone(canvas, x, 0.9, wid, 0.1, 960, 192);
+        const r = await w.recognize(z);
+        out.push((r.data?.text || '').replace(/\s+/g, ''));
+      }
+      // Near-identical frames repeat the same misreading, so implausible numbers are dropped here
+      // rather than left to the 2-identical-reads contradiction rule.
+      return out.filter(plausibleCollector).join(' ');
+    } catch { return ''; }
   }
 
   /**
@@ -29,16 +63,19 @@ export class OCRAdapter {
     const top = this._zone(rectifiedCanvas, 0, 0, 1, 0.32, 900, 250);
     const bottom = this._zone(rectifiedCanvas, 0, 0.69, 1, 0.31, 900, 250);
     const jaPass = auto ? this._japaneseRead(top) : Promise.resolve(null);
+    const numberPass = this._numberRead(rectifiedCanvas);
     const topResult = await worker.recognize(top);
     const bottomResult = await worker.recognize(bottom);
     const ja = await jaPass;
+    const numberText = await numberPass;
     const topText = (topResult.data?.text || '').replace(/\s+/g, ' ').trim();
     const bottomText = (bottomResult.data?.text || '').replace(/\s+/g, ' ').trim();
     const script = auto ? {
       latinConf: Number(topResult.data?.confidence) || 0, jaConf: ja?.confidence ?? 0, jaText: ja?.text || '',
       latinStrong: strongLatinWords(topResult.data) + strongLatinWords(bottomResult.data), jaStrong: ja?.strong ?? 0, jaWords: ja?.words || [],
     } : null;
-    const parsed = this.parse(`${topText} ${bottomText}${script?.jaText ? ` ${script.jaText}` : ''}`, bottomText);
+    // The digits-only read comes first: parseCollectorText takes the first "N/T" it finds.
+    const parsed = this.parse(`${topText} ${bottomText}${script?.jaText ? ` ${script.jaText}` : ''}`, `${numberText} ${bottomText}`);
     const lookupItems = await this.lookupCanonical(parsed, lang);
     const candidates = await this.resolveCandidates(parsed, lang, visualCandidates, lookupItems);
     const best = candidates[0] || null;
@@ -129,6 +166,14 @@ export class OCRAdapter {
     if (window.Tesseract) return;
     await new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; s.async = true; s.onload = resolve; s.onerror = reject; document.head.appendChild(s); });
   }
+}
+
+/** A digits-only read that looks like a real printed "number/total". */
+export function plausibleCollector(text) {
+  const m = String(text || '').match(/^(\d{1,4})\/(\d{2,4})$/);
+  if (!m) return false;
+  const n = Number(m[1]), t = Number(m[2]);
+  return n >= 1 && t >= 10 && t <= 400 && n <= t + 150;
 }
 
 /** Latin words (3+ letters) the Latin model is confident about. */

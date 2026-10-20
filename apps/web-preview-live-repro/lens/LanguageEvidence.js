@@ -65,7 +65,9 @@ export function detectCardLanguage(text, candidate = {}, script = null) {
   const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
   const [best, second] = ranked;
   const lang = best[1] >= 1 && best[1] > second[1] ? best[0] : null;
-  return { lang, scores, nameHit };
+  // A read with many independent markers of one language and none of the others is strong.
+  const strong = Boolean(lang && best[1] >= 4 && second[1] === 0);
+  return { lang, scores, nameHit, strong };
 }
 
 export class LanguageConsensus {
@@ -77,10 +79,11 @@ export class LanguageConsensus {
 
   reset() { this.reads = new Map(); } // familyId -> Map(lang -> count)
 
-  observe(familyId, lang, languages = null) {
+  /** @param {boolean} [strong] a read with ≥4 distinct markers of one language and none of another counts twice */
+  observe(familyId, lang, languages = null, strong = false) {
     if (familyId && lang) {
       const m = this.reads.get(familyId) || new Map();
-      m.set(lang, (m.get(lang) || 0) + 1);
+      m.set(lang, (m.get(lang) || 0) + (strong ? 2 : 1));
       this.reads.set(familyId, m);
     }
     return this.resolved(familyId, languages);

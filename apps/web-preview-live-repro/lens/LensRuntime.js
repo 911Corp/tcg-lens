@@ -29,7 +29,8 @@ export class LensRuntime {
     this.video = video;
     this.trackLayer = trackLayer;
     this.statusPill = statusPill;
-    this.hud = new HudView(hudRoot);
+    this.hud = new HudView(hudRoot, { onLongPress: () => this.toggleDiagnostics() });
+    this.stats = { ticks: 0, detections: 0, detectSource: '-', detectMs: 0, queries: 0, queryMs: 0, ocr: 0, ocrMs: 0, top: null, lang: null, model: 'chargement' };
     this.lastHudAt = 0;
     this.cameraError = null;
     this.debugNode = debugNode;
@@ -87,12 +88,14 @@ export class LensRuntime {
   /** Download the visual index and the model before the camera is even granted. */
   preload() {
     this.lang = window.TCGShell?.scanLang?.() || this.lang || 'auto';
-    this.embedding.ensureModel().then(ready => this.telemetry.emit('EMBEDDING_MODEL', { ready }));
+    this.embedding.ensureModel().then(ready => { this.stats.model = ready ? 'prêt' : 'indisponible'; this.telemetry.emit('EMBEDDING_MODEL', { ready }); });
     return this._loadIndex();
   }
 
   /** The camera permission prompt is open. */
   markCameraPending() { this.cameraPending = true; this.cameraError = null; this._hud(true); }
+
+  toggleDiagnostics() { if (!this.debugNode) return; this.debugNode.hidden = !this.debugNode.hidden; this._renderDebug({ type: 'DIAG' }, true); }
 
   pause() { this.paused = true; this.camera.cancel(this.frameHandle); this.frameHandle = null; }
 
@@ -177,7 +180,10 @@ export class LensRuntime {
   async _tick(at) {
     if (!this.running || this.paused || !this.sampler.shouldSample(at)) return;
     if (this.video.readyState < 2 || !this.video.videoWidth) return;
-    const detections = this.detector.detect(this.video);
+    const d0 = performance.now();
+    const detections = this.detector.detect(this.video, { angleHint: this.tracker.track?.angle ?? undefined });
+    this.stats.ticks++; this.stats.detectMs = Math.round(performance.now() - d0);
+    if (detections.length) { this.stats.detections++; this.stats.detectSource = detections[0].source || '-'; }
     const priorGeneration = this.tracker.track?.generation;
     const track = this.tracker.update(detections, at);
     if (!track) {
@@ -250,7 +256,10 @@ export class LensRuntime {
     c.visualInFlight = true; c.lastVisualAt = performance.now();
     const token = c.generation;
     try {
+      const q0 = performance.now();
       const candidates = await this.index.query(frame.canvas, this.lang, this.embedding, this.policy.topK);
+      this.stats.queries++; this.stats.queryMs = Math.round(performance.now() - q0);
+      this.stats.top = candidates[0] ? `${candidates[0].id} ${candidates[0].score.toFixed(3)} Δ${(candidates[0].score - (candidates[1]?.score ?? 0)).toFixed(3)}${candidates[0].embeddingVerified ? '' : ' (rapide)'}` : 'aucun';
       if (!this._isCurrent(token)) return;
       c.visualCandidates = candidates;
       if (!candidates.length) {
@@ -306,7 +315,8 @@ export class LensRuntime {
     if (!top || !evidence?.available) return;
     const languages = top.languages?.length ? top.languages : [top.lang || this.lang];
     const read = detectCardLanguage(evidence.text, top, evidence.script);
-    const resolved = c.langConsensus.observe(top.id, read.lang, languages);
+    const resolved = c.langConsensus.observe(top.id, read.lang, languages, read.strong);
+    this.stats.lang = `${read.lang || '?'} → ${resolved || 'non prouvée'}`;
     this.telemetry.emit('LANGUAGE_READ', { candidateId, read: read.lang, scores: read.scores, resolved });
     if (c.visualEvidence?.candidateId === top.id) c.visualEvidence = this._visualEvidence(c, top, c.visualEvidence.margin, c.visualEvidence.quality);
   }
@@ -325,7 +335,9 @@ export class LensRuntime {
     c.ocrInFlight = true; c.lastOcrAt = performance.now();
     try {
       this.telemetry.emit('OCR_START', token);
+      const o0 = performance.now();
       const evidence = await this.ocr.analyze(canvas, this.lang, c.visualCandidates);
+      this.stats.ocr++; this.stats.ocrMs = Math.round(performance.now() - o0);
       evidence.text = evidence.text || '';
       // Targeted warming is global (index-level) and identity-neutral, so it runs even if this
       // OCR result turns out to be stale for the current track.
@@ -598,10 +610,23 @@ export class LensRuntime {
     });
   }
 
-  _renderDebug(event) {
-    if (!this.debugNode) return;
-    const c = this.context;
-    this.debugNode.textContent = `${event.type} · idx ${this.index.count(this.lang)} · q ${Math.round((c?.lastQuality?.score || 0) * 100)} · gen ${c?.generation || 0}`;
+  _renderDebug(event, force = false) {
+    if (!this.debugNode || this.debugNode.hidden) return;
+    const at = performance.now();
+    if (!force && at - (this.lastDebugAt || 0) < 250) return;
+    this.lastDebugAt = at;
+    const c = this.context, st = this.stats, tr = this.tracker.track;
+    const lines = [
+      `caméra ${this.video.videoWidth}×${this.video.videoHeight} · état ${this.stateMachine.state}`,
+      `catalogue ${this.index.count(this.lang)} réf. (${this.lang}) · modèle ${st.model}`,
+      `détection ${st.detections}/${st.ticks} images · ${st.detectMs} ms · ${st.detectSource}`,
+      `suivi ${tr ? `${tr.hits} hits${tr.stable ? ' stable' : ''}` : 'aucune carte'} · qualité ${Math.round((c?.lastQuality?.score || 0) * 100)}`,
+      `visuel ${st.queries} req · ${st.queryMs} ms · ${st.top || '-'}`,
+      `OCR ${st.ocr} · ${st.ocrMs} ms · langue ${st.lang || '-'}`,
+      `décision ${c?.lastDecision ? `${c.lastDecision.decision} ${c.lastDecision.reason}` : '-'}`,
+      `dernier évènement ${event.type}`,
+    ];
+    this.debugNode.textContent = lines.join('\n');
   }
 }
 
