@@ -1,0 +1,147 @@
+{
+  "asOf": "2026-10-20",
+  "includePrerelease": false,
+  "buildId": "583a9a02-e57a-4d1a-b042-401efb9c0d0a",
+  "coverageRunId": "577882c3-8fa9-4b7b-ad1c-25e18d774e2a",
+  "policy": "catalog-policy-v0.3.1",
+  "thresholds": {
+    "minImageOk": 1,
+    "minVisualIndexed": 1,
+    "minVariants": 1,
+    "minMarketMapped": 0.9,
+    "minPriced": 0.8
+  },
+  "priceFreshnessDays": 14,
+  "languages": {
+    "en": {
+      "sets": 220,
+      "physicalSets": 205,
+      "digitalOnlySets": 15,
+      "upcomingSets": [],
+      "unknownReleaseSets": 0,
+      "readiness": {
+        "EXCLUDED": 15,
+        "DISCOVERED": 4,
+        "CATALOGUED": 2,
+        "IDENTITY_COMPLETE": 88,
+        "VISUAL_COMPLETE": 53,
+        "MARKET_READY": 0,
+        "LENS_READY": 58
+      },
+      "physical": {
+        "expectedCards": 21484,
+        "canonicalPrintings": 21256,
+        "variantsCovered": 21256,
+        "variantRows": 34213,
+        "imagesListed": 19666,
+        "imagesProbed": 19666,
+        "imagesOk": 19633,
+        "visualIndexEligible": 19633,
+        "cardmarketMapped": 11430,
+        "tcgplayerMapped": 16304,
+        "priced": 17263,
+        "openConflicts": 0,
+        "cardmarketAssertionDisagrees": 0,
+        "tcgplayerAssertionDisagrees": 7
+      },
+      "allCanonicalPrintings": 23736,
+      "livePool": 19633,
+      "livePoolVisualOnlyLockAllowed": 9064,
+      "livePoolLockBlocked": 853
+    },
+    "fr": {
+      "sets": 202,
+      "physicalSets": 187,
+      "digitalOnlySets": 15,
+      "upcomingSets": [],
+      "unknownReleaseSets": 0,
+      "readiness": {
+        "EXCLUDED": 15,
+        "DISCOVERED": 3,
+        "CATALOGUED": 8,
+        "IDENTITY_COMPLETE": 80,
+        "VISUAL_COMPLETE": 51,
+        "MARKET_READY": 0,
+        "LENS_READY": 45
+      },
+      "physical": {
+        "expectedCards": 20340,
+        "canonicalPrintings": 20045,
+        "variantsCovered": 20045,
+        "variantRows": 32223,
+        "imagesListed": 17132,
+        "imagesProbed": 17132,
+        "imagesOk": 17113,
+        "visualIndexEligible": 17113,
+        "cardmarketMapped": 10511,
+        "tcgplayerMapped": 0,
+        "priced": 10510,
+        "openConflicts": 0,
+        "cardmarketAssertionDisagrees": 0,
+        "tcgplayerAssertionDisagrees": 0
+      },
+      "allCanonicalPrintings": 22161,
+      "livePool": 17113,
+      "livePoolVisualOnlyLockAllowed": 9162,
+      "livePoolLockBlocked": 1041
+    },
+    "ja": {
+      "sets": 184,
+      "physicalSets": 184,
+      "digitalOnlySets": 0,
+      "upcomingSets": [],
+      "unknownReleaseSets": 0,
+      "readiness": {
+        "EXCLUDED": 0,
+        "DISCOVERED": 68,
+        "CATALOGUED": 1,
+        "IDENTITY_COMPLETE": 94,
+        "VISUAL_COMPLETE": 5,
+        "MARKET_READY": 0,
+        "LENS_READY": 16
+      },
+      "physical": {
+        "expectedCards": 18031,
+        "canonicalPrintings": 12781,
+        "variantsCovered": 12781,
+        "variantRows": 15781,
+        "imagesListed": 3882,
+        "imagesProbed": 3882,
+        "imagesOk": 3870,
+        "visualIndexEligible": 3870,
+        "cardmarketMapped": 0,
+        "tcgplayerMapped": 4940,
+        "priced": 4824,
+        "openConflicts": 0,
+        "cardmarketAssertionDisagrees": 0,
+        "tcgplayerAssertionDisagrees": 0
+      },
+      "allCanonicalPrintings": 12781,
+      "livePool": 3870,
+      "livePoolVisualOnlyLockAllowed": 1352,
+      "livePoolLockBlocked": 799
+    }
+  },
+  "externalUpcomingSets": [
+    {
+      "lang": "en",
+      "group_id": "24831",
+      "name": "ME06: Delta Reign",
+      "abbreviation": "DLR",
+      "published_on": "2026-11-06",
+      "products_staged": 21,
+      "printings_promoted": 0,
+      "sealed_promoted": 21
+    }
+  ],
+  "livePool": {
+    "total": 40616,
+    "visualOnlyLockAllowed": 19578,
+    "lockBlockedByUnindexedTwin": 2693,
+    "exclusions": {
+      "NO_REFERENCE_IMAGE": 13402,
+      "DIGITAL_ONLY_PRODUCT": 4596,
+      "IMAGE_MISSING_OR_BROKEN": 64
+    }
+  }
+}

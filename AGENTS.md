@@ -21,7 +21,17 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline: 19 unit tests pass, all 7 SQL migrations validate, TypeScript compiles, iOS Swift syntax parses, web preview syntax passes.
+Expected baseline (v0.3.1): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 52/52,
+benchmark 6/6 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
+explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
+0001-0008, the four PostgreSQL integration suites must pass too.
+
+## v0.3.1 candidate-pool rules (do not weaken)
+- The Lens candidate pool comes only from the canonical export (`npm run build:coverage`); never from raw TCGdex.
+- Digital-only products (Pokémon TCG Pocket) and unreleased sets never enter the live pool.
+- Visual-only locks require `visualOnlyLockAllowed === true`; `lockBlockedReason` forbids any lock.
+- Set / collector number / language are corroborating evidence only; a bare local number is not printing support.
+- Market coverage never affects pool membership, readiness of identity, or lock permission.
 
 Do not merge a change that makes this command fail.
 

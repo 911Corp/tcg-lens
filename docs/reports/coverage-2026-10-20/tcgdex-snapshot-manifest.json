@@ -1,0 +1,38 @@
+{
+  "source": "tcgdex",
+  "apiBase": "https://api.tcgdex.net/v2",
+  "startedAt": "2026-10-19T22:54:20.199Z",
+  "languages": {
+    "fr": {
+      "setsListed": 202,
+      "setsFetched": 202,
+      "setFailures": [],
+      "cardsListed": 22170,
+      "cardsRequested": 22170,
+      "cardsFetched": 22170,
+      "cardFailures": [],
+      "seconds": 79
+    },
+    "en": {
+      "setsListed": 220,
+      "setsFetched": 220,
+      "setFailures": [],
+      "cardsListed": 23736,
+      "cardsRequested": 23736,
+      "cardsFetched": 23736,
+      "cardFailures": [],
+      "seconds": 89
+    },
+    "ja": {
+      "setsListed": 184,
+      "setsFetched": 184,
+      "setFailures": [],
+      "cardsListed": 12781,
+      "cardsRequested": 12781,
+      "cardsFetched": 12781,
+      "cardFailures": [],
+      "seconds": 49
+    }
+  },
+  "finishedAt": "2026-10-19T22:57:56.267Z"
+}
