@@ -1,4 +1,7 @@
-import { DEFAULT_POLICY, LENS_STATES } from './config.js';
+import { DEFAULT_POLICY, LENS_STATES, CALIBRATED_POLICY } from './config.js';
+
+// Language belongs to the physical card in the track, whatever candidate is on top.
+const CARD = 'card';
 import { CameraAdapter } from './CameraAdapter.js';
 import { FrameSampler } from './FrameSampler.js';
 import { CardDetector } from './CardDetector.js';
@@ -30,6 +33,9 @@ export class LensRuntime {
     this.trackLayer = trackLayer;
     this.statusPill = statusPill;
     this.hud = new HudView(hudRoot, { onLongPress: () => this.toggleDiagnostics() });
+    // Printings withdrawn this session because the printed language contradicted them: they need a
+    // proven language before any new instant lock.
+    this.languageSuspects = new Set();
     this.stats = { ticks: 0, detections: 0, detectSource: '-', detectMs: 0, queries: 0, queryMs: 0, ocr: 0, ocrMs: 0, top: null, lang: null, model: 'chargement' };
     this.lastHudAt = 0;
     this.cameraError = null;
@@ -86,10 +92,24 @@ export class LensRuntime {
     }
   }
 
+  /** Calibrated thresholds belong to the calibrated index score scale (v0.3.5). */
+  _applyCalibratedPolicy() {
+    if (this.policy.calibratedInstant) return;
+    this.policy = { ...this.policy, ...CALIBRATED_POLICY };
+    this.fusion.policy = { ...this.fusion.policy, ...CALIBRATED_POLICY };
+    this.tracker.minStableHits = this.policy.minStableHits;
+    const c = this.context;
+    if (c) {
+      Object.assign(c.consensus, { strongSwitchScore: this.policy.temporalSwitchScore, strongSwitchMargin: this.policy.temporalSwitchMargin });
+      Object.assign(c.changeDetector, { minScore: this.policy.changeVisualScore, minMargin: this.policy.changeVisualMargin });
+    }
+    this.stats.mode = 'instantané (index calibré)';
+  }
+
   /** Download the visual index and the model before the camera is even granted. */
   preload() {
     this.lang = window.TCGShell?.scanLang?.() || this.lang || 'auto';
-    this.embedding.ensureModel().then(ready => { this.stats.model = ready ? 'prêt' : 'indisponible'; this.telemetry.emit('EMBEDDING_MODEL', { ready }); });
+    this.embedding.ensureModel().then(ready => { this.stats.model = ready ? `prêt (${this.embedding.backend || '?'})` : 'indisponible'; this.telemetry.emit('EMBEDDING_MODEL', { ready }); });
     return this._loadIndex();
   }
 
@@ -146,7 +166,8 @@ export class LensRuntime {
     });
     if (this.lang !== lang) return;
     this.indexDownload = null;
-    this.telemetry.emit('INDEX_READY', { precomputed: ok, refs: this.index.count(lang), error: ok ? null : this.index.preError });
+    if (ok && this.index.usesDeep(lang)) this._applyCalibratedPolicy();
+    this.telemetry.emit('INDEX_READY', { precomputed: ok, deep: this.index.usesDeep(lang), refs: this.index.count(lang), error: ok ? null : (this.index.preError || this.index.deepError) });
     if (!ok) { await this.index.load(lang === 'auto' ? 'fr' : lang); if (this.running && !this.index.warming) this._warmIndex(); }
     this._hud(true);
   }
@@ -222,8 +243,16 @@ export class LensRuntime {
     const accepted = this.bestFrame.consider({ canvas: rectified, quality, generation: track.generation, at });
     const locked = Boolean(this.context.locked);
     const visualDue = at - this.context.lastVisualAt >= (locked ? this.policy.lockedVisualIntervalMs : this.policy.visualIntervalMs);
-    if ((accepted || locked) && visualDue && quality.score >= this.policy.minQualityForVisual) this._launchVisual(track, accepted || { canvas: rectified, quality, generation: track.generation, at });
-    if (!locked && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, this.ocrRectifier.rectify(this.video, track.quad) || accepted?.canvas || this.bestFrame.best?.canvas || rectified);
+    // Calibrated index: every due frame is compared (a query costs one model pass); the legacy path
+    // only re-analysed sharper frames because each query downloaded reference images.
+    const analyse = accepted || locked || this.policy.calibratedInstant;
+    if (analyse && visualDue && quality.score >= this.policy.minQualityForVisual) this._launchVisual(track, accepted || { canvas: rectified, quality, generation: track.generation, at });
+    const languagePending = Boolean(locked && this.context.locked.identity?.languageUnverified);
+    // Calibrated mode: OCR is not on the critical path. It starts once the visual decision needs it
+    // (artwork twins, ambiguity) or after the lock to read the language, keeping the CPU for vision.
+    const ocrNeeded = !this.policy.calibratedInstant || languagePending
+      || ['artwork_twins', 'language_unresolved', 'visual_candidate_needs_corroboration', 'visual_only_lock_not_permitted_for_candidate_set', 'top1_top2_margin_too_small'].includes(this.context.lastDecision?.reason);
+    if (ocrNeeded && (!locked || languagePending) && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, this.ocrRectifier.rectify(this.video, track.quad) || accepted?.canvas || this.bestFrame.best?.canvas || rectified);
     this._maybeBarcode(at);
     this._hud();
   }
@@ -269,13 +298,15 @@ export class LensRuntime {
       this.stats.queries++; this.stats.queryMs = Math.round(performance.now() - q0);
       this.stats.top = candidates[0] ? `${candidates[0].id} ${candidates[0].score.toFixed(3)} Δ${(candidates[0].score - (candidates[1]?.score ?? 0)).toFixed(3)}${candidates[0].embeddingVerified ? '' : ' (rapide)'}` : 'aucun';
       if (!this._isCurrent(token)) return;
+      if (candidates[0]?.calibrated) candidates.splice(0, candidates.length, ...this._resolveTwins(c, candidates));
       c.visualCandidates = candidates;
       if (!candidates.length) {
         if (!c.locked) { this._safeTransition(LENS_STATES.UNKNOWN, { reason: this.index.count(this.lang) ? 'no_visual_match' : 'visual_index_empty' }); this._hud(true); }
         return;
       }
       const top = candidates[0], second = candidates[1];
-      const margin = top.score - (second?.score ?? 0);
+      // Calibrated index: margin against the best family that is NOT an artwork twin.
+      const margin = top.calibrated && Number.isFinite(top.marginNonTwin) ? top.marginNonTwin : top.score - (second?.score ?? 0);
       const previousVisualCandidateId = c.visualEvidence?.candidateId || null;
       c.visualEvidence = this._visualEvidence(c, top, margin, frame.quality.score);
       const temporal = c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
@@ -307,15 +338,46 @@ export class LensRuntime {
    * Visual evidence for the top printing family. Once the physical language is proven, lock
    * policy (visual-only permission, artwork-twin block) comes from that language's printing.
    */
+  /**
+   * Artwork twins (same illustration in another printing): keep the previous choice while it stays
+   * in the twin group (no flip-flop between twins), switch to the twin in the card's proven language,
+   * and keep as "active twins" only those compatible with that language.
+   */
+  _resolveTwins(c, cands) {
+    const top = cands[0], twins = top.twins || [];
+    if (!twins.length) { top.activeTwins = []; return cands; }
+    const langsOf = id => (id === top.id ? top.languages : twins.find(t => t.id === id)?.languages) || [];
+    const group = [top.id, ...twins.map(t => t.id)];
+    const lang = c.langConsensus.resolved(CARD);
+    let chosenId = top.id;
+    const prev = c.visualEvidence?.candidateId;
+    if (prev && group.includes(prev) && cands.some(x => x.id === prev)) chosenId = prev;
+    if (lang && !langsOf(chosenId).includes(lang)) {
+      const alt = group.filter(id => langsOf(id).includes(lang) && cands.some(x => x.id === id))
+        .sort((a, b) => (top.twinScores?.[b] ?? (b === top.id ? top.score : 0)) - (top.twinScores?.[a] ?? (a === top.id ? top.score : 0)))[0];
+      if (alt) chosenId = alt;
+    }
+    const chosen = cands.find(x => x.id === chosenId) || top;
+    chosen.calibrated = true;
+    chosen.marginNonTwin = top.marginNonTwin;
+    chosen.twinGroup = group;
+    chosen.activeTwins = group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)));
+    if (chosen !== top) chosen.score = Math.max(chosen.score, top.score - 0.0001);
+    return [chosen, ...cands.filter(x => x !== chosen)];
+  }
+
   _visualEvidence(c, top, margin, quality) {
     const languages = top.languages?.length ? top.languages : [top.lang || this.lang];
-    const resolvedLang = c.langConsensus.resolved(top.id, languages);
+    const resolvedLang = c.langConsensus.resolved(CARD, languages);
     const row = (resolvedLang && top.byLang?.[resolvedLang]) || top;
     return {
       candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true,
       visualOnlyLockAllowed: row.visualOnlyLockAllowed === true, lockBlockedReason: row.lockBlockedReason || null,
-      languages, resolvedLang, languageContradiction: c.langConsensus.contradicted(top.id, languages), quality,
-      languageOutside: c.langConsensus.outside(top.id, languages),
+      languages, resolvedLang, languageContradiction: c.langConsensus.contradicted(CARD, languages), quality,
+      languageOutside: c.langConsensus.outside(CARD, languages),
+      calibrated: top.calibrated === true,
+      languageProofRequired: this.languageSuspects.has(top.id),
+      twinFree: top.calibrated === true ? (top.activeTwins?.length ?? 0) === 0 : undefined,
       languageWaitMs: c.langWait?.id === top.id ? performance.now() - c.langWait.since : 0,
     };
   }
@@ -325,14 +387,15 @@ export class LensRuntime {
     if (!top || !evidence?.available) return;
     const languages = top.languages?.length ? top.languages : [top.lang || this.lang];
     const read = detectCardLanguage(evidence.text, top, evidence.script);
-    const resolved = c.langConsensus.observe(top.id, read.lang, languages, read.strong);
+    const resolved = c.langConsensus.observe(CARD, read.lang, languages, read.strong);
     this.stats.lang = `${read.lang || '?'} → ${resolved || 'non prouvée'}`;
     this.telemetry.emit('LANGUAGE_READ', { candidateId, read: read.lang, scores: read.scores, resolved });
     if (c.visualEvidence?.candidateId === top.id) c.visualEvidence = this._visualEvidence(c, top, c.visualEvidence.margin, c.visualEvidence.quality);
   }
 
   async _launchOcr(track, canvas) {
-    const c = this.context; if (!c || c.ocrInFlight || c.generation !== track.generation || c.locked) return;
+    const c = this.context; if (!c || c.ocrInFlight || c.generation !== track.generation) return;
+    if (c.locked && !c.locked.identity?.languageUnverified) return;
     const token = this._identityToken();
     if (!token.candidateId || token.temporalCandidateId !== token.candidateId) {
       this.telemetry.emit('OCR_SKIPPED_IDENTITY_UNSTABLE', {
@@ -361,6 +424,7 @@ export class LensRuntime {
         return;
       }
       this._observeLanguage(c, evidence, token.candidateId);
+      if (c.locked) { this._afterLockLanguage(c); return; }
       const consensusEvidence = c.ocrConsensus.observe(evidence, token.candidateId);
       c.ocrEvidence = consensusEvidence;
       this.telemetry.emit('OCR_RESULT', {
@@ -383,6 +447,37 @@ export class LensRuntime {
     }
   }
 
+  /**
+   * After an instant lock the language is read in the background: proven → shown; a language the
+   * printing does not exist in (read twice) → the identification is withdrawn, never kept.
+   */
+  _afterLockLanguage(c) {
+    const id = c.locked.identity, languages = id.languageCandidates?.length ? id.languageCandidates : [id.lang].filter(Boolean);
+    const contradicted = c.langConsensus.contradicted(CARD, languages);
+    if (contradicted) {
+      this.telemetry.emit('LOCK_RETRACTED', { id: c.locked.id, reason: `language_contradiction:${contradicted}` });
+      const blocked = c.locked.id;
+      this.languageSuspects.add(blocked);
+      const track = this.tracker.bumpGeneration();
+      this.marketOverlay.clear();
+      this._newContext(track, { resetState: true, reason: 'lock_retracted' });
+      this.context.blockedId = blocked;
+      this.context.lastDecision = { decision: 'AMBIGUOUS', reason: `retracted_language_contradiction:${contradicted}` };
+      // The card is still in view: legal path ACQUIRING → TRACKING → ANALYZING → AMBIGUOUS.
+      for (const s of [LENS_STATES.TRACKING, LENS_STATES.ANALYZING, LENS_STATES.AMBIGUOUS]) this._safeTransition(s, { reason: 'lock_retracted' });
+      this._hud(true);
+      return;
+    }
+    const lang = c.langConsensus.resolved(CARD, languages);
+    if (lang) {
+      const row = c.visualCandidates.find(x => x.id === c.locked.id)?.byLang?.[lang];
+      const { byLang, languages: _l, ...printing } = row || id;
+      c.locked.identity = { ...id, ...printing, lang, languageUnverified: false, languageCandidates: undefined };
+      this.telemetry.emit('LOCK_LANGUAGE_PROVEN', { id: c.locked.id, lang });
+      this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
+    }
+  }
+
   _resetOcrEvidence(c, { reason, temporalEpoch = 0 } = {}) {
     if (!c) return;
     c.ocrEvidence = null;
@@ -399,6 +494,7 @@ export class LensRuntime {
     if (c.langWait && c.langWait.id !== c.visualEvidence.candidateId) c.langWait = null;
     if (c.langWait) c.visualEvidence.languageWaitMs = performance.now() - c.langWait.since;
     let decision = this.fusion.evaluate({ temporal, visual: c.visualEvidence, ocr: c.ocrEvidence, canonical });
+    if (c.blockedId && decision.candidateId === c.blockedId && decision.decision === 'LOCK') decision = { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: 'retracted_language_contradiction' };
     if (decision.reason === 'language_unresolved' && !c.langWait) {
       c.langWait = { id: decision.candidateId, since: performance.now() };
       // Re-check when the grace delay expires even if no new frame evidence arrives.
@@ -416,6 +512,8 @@ export class LensRuntime {
   _lock(decision, candidate) {
     const c = this.context; if (!c || !candidate?.id) return false;
     const detail = { id: candidate.id, confidence: decision.confidence, reason: decision.reason };
+    // An instant lock can come straight from ANALYZING: pass through VERIFYING (legal path).
+    if (this.stateMachine.state === LENS_STATES.ANALYZING) this._safeTransition(LENS_STATES.VERIFYING, { candidateId: candidate.id, reason: decision.reason });
     if (!this._safeTransition(LENS_STATES.LOCKED, detail)) {
       this.telemetry.emit('LOCK_REJECTED_STATE', { ...detail, state: this.stateMachine.state });
       return false;
@@ -427,7 +525,7 @@ export class LensRuntime {
     const identity = decision.languageUnverified
       ? { ...printing, lang: null, languageUnverified: true, languageCandidates: candidate.languages || [printing.lang].filter(Boolean) }
       : { ...printing, lang: printing.lang || (this.lang === 'auto' ? null : this.lang) };
-    c.locked = { id: candidate.id, confidence: decision.confidence, identity };
+    c.locked = { id: candidate.id, confidence: decision.confidence, identity, group: candidate.twinGroup || [candidate.id] };
     document.dispatchEvent(new CustomEvent('tcglens:card-locked', { detail: identity }));
     this.marketOverlay.showLocked(identity, decision.confidence);
     this._renderTrack(this.tracker.track);
@@ -443,9 +541,11 @@ export class LensRuntime {
       this.telemetry.emit('CHANGE_REJECTED_STATE', { state: this.stateMachine.state, candidateId: candidate?.id || null });
       return;
     }
+    // A twin of the locked card (same artwork) is the same physical card, not a change.
+    const same = c.locked.group?.includes(candidate.id);
     const result = c.changeDetector.observe({
       lockedCandidateId: c.locked.id,
-      candidate: { ...candidate, margin },
+      candidate: { ...candidate, id: same ? c.locked.id : candidate.id, margin },
     });
     this.telemetry.emit('CHANGE_EVIDENCE', result);
 
@@ -633,7 +733,7 @@ export class LensRuntime {
     const c = this.context, st = this.stats, tr = this.tracker.track;
     const lines = [
       `caméra ${this.video.videoWidth}×${this.video.videoHeight} · état ${this.stateMachine.state}`,
-      `catalogue ${this.index.count(this.lang)} réf. (${this.lang}) · modèle ${st.model}`,
+      `catalogue ${this.index.count(this.lang)} réf. (${this.lang}) · modèle ${st.model} · ${st.mode || 'standard'}`,
       `détection ${st.detections}/${st.ticks} images · ${st.detectMs} ms · ${st.detectSource}`,
       `suivi ${tr ? `${tr.hits} hits${tr.stable ? ' stable' : ''}` : 'aucune carte'} · qualité ${Math.round((c?.lastQuality?.score || 0) * 100)}`,
       `visuel ${st.queries} req · ${st.queryMs} ms · ${st.top || '-'}`,

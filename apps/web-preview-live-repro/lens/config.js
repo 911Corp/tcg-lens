@@ -56,6 +56,27 @@ export const DEFAULT_POLICY = Object.freeze({
   cardAspect: 63 / 88,
 });
 
+/**
+ * v0.3.5 calibrated instant recognition (DeepIndex). Scores are on the learned-whitening scale;
+ * thresholds come from held-out simulated camera crops: with score ≥ 0.80 and margin ≥ 0.06 against
+ * the best non-twin family, 0 wrong locks and 0 open-set (missing reference) false locks outside
+ * artwork twins. Applied by the runtime only once the calibrated index is loaded.
+ */
+export const CALIBRATED_POLICY = Object.freeze({
+  calibratedInstant: true,
+  instantScore: 0.8,
+  instantMargin: 0.06,
+  instantVotes: 2,
+  instantMinQuality: 0.35,
+  visualIntervalMs: 110,
+  minStableHits: 2,
+  temporalSwitchScore: 0.8,
+  temporalSwitchMargin: 0.06,
+  changeVisualScore: 0.8,
+  changeVisualMargin: 0.06,
+  provisionalVisualScore: 0.7,
+});
+
 export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }

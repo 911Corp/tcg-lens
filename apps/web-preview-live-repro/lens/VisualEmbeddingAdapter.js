@@ -12,6 +12,16 @@ export function cosine(a, b) {
   return dot / (Math.sqrt(aa * bb) || 1);
 }
 
+function softwareWebGL() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (!gl) return true;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    return /swiftshader|llvmpipe|software|basic render/i.test(r);
+  } catch { return true; }
+}
+
 export class VisualEmbeddingAdapter {
   static BATCH = 8;
   constructor() {
@@ -27,7 +37,16 @@ export class VisualEmbeddingAdapter {
         await this._loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js', 'tf');
         await this._loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js', 'mobilenet');
         if (!window.tf || !window.mobilenet) return false;
-        try { await window.tf.setBackend('webgl'); } catch {}
+        // Real GPU → WebGL (phones). Software-only WebGL (SwiftShader, llvmpipe) or none → WebAssembly,
+        // which is ~15× faster there (measured 19 ms vs 276 ms per embedding).
+        this.backend = softwareWebGL() ? 'wasm' : 'webgl';
+        if (this.backend === 'wasm') {
+          try {
+            await this._loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/tf-backend-wasm.min.js', '__tfwasm_never__');
+            window.tf.wasm.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/');
+          } catch { this.backend = 'webgl'; }
+        }
+        try { await window.tf.setBackend(this.backend); } catch { this.backend = window.tf.getBackend(); }
         await window.tf.ready();
         this.model = await window.mobilenet.load({ version: 2, alpha: 0.5 });
         // Warm-up: WebGL compiles shaders per input shape on first use (1–2 s on phones). Do it now

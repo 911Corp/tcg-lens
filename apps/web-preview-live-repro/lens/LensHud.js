@@ -47,6 +47,10 @@ function ambiguousHint(reason = '', lang = 'fr', idx = null) {
   if (reason.startsWith('candidate_lock_blocked')) {
     return 'Une réédition quasi identique existe et ne peut pas encore être distinguée. TCG Lens préfère ne pas trancher.';
   }
+  if (reason.startsWith('retracted_language_contradiction')) {
+    return 'Le texte imprimé contredit l’identification (autre langue). TCG Lens a retiré le résultat plutôt que de se tromper.';
+  }
+  if (reason === 'artwork_twins') return 'Cette illustration existe dans plusieurs éditions : lecture du texte imprimé.';
   if (reason.startsWith('language_contradiction')) {
     const l = reason.split(':')[1];
     return `La carte semble être en ${LANG_NAMES[l] || l}, mais cette édition n’existe pas dans cette langue au catalogue. TCG Lens préfère ne pas trancher.`;

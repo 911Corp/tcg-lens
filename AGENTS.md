@@ -21,8 +21,8 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.4): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 78/78,
-benchmark 15/15 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
+Expected baseline (v0.3.5): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 81/81,
+benchmark 18/18 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
 
@@ -33,6 +33,14 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
 - Set / collector number / language are corroborating evidence only; a bare local number is not printing support.
 - Market coverage never affects pool membership, readiness of identity, or lock permission.
 - A printed-metadata contradiction is hard only after two identical mismatching reads; one noisy OCR read must not poison a track.
+
+## Calibrated instant recognition (v0.3.5)
+- Recognition uses the calibrated index (`lens/DeepIndex.js`, `data/deep-*`, built by `tools/deep/`). Any change
+  to the backbone, descriptor or preprocessing requires rebuilding it; `train-and-export.py` refuses to export if
+  the held-out gate shows a wrong or open-set non-twin false lock. Bump `ASSET_CACHE` in `sw.js` after a rebuild.
+- Instant visual locks are allowed only for twin-free candidates on the calibrated scale (`CALIBRATED_POLICY`);
+  artwork twins always need printed evidence. Language is never guessed: shown unverified, proven in background,
+  and a contradicting read withdraws the lock.
 
 ## Lens interface rules (v0.3.2)
 - All user-facing scanner text comes from `lens/LensHud.js` (`describeHud`): plain French, actionable, never machine state names.

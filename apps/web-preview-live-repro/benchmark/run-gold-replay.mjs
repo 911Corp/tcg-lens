@@ -86,6 +86,26 @@ const scenarios = [
     run: () => runReplay({ languages: ['ja'], autoLanguage: false }),
     requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
+  // v0.3.5 calibrated instant recognition (scores on the calibrated scale in production; the replay
+  // fixture scores clear the calibrated bars).
+  {
+    // Instant: every segment locks (A1, B and A2), ~270 ms after the track is stable.
+    id: 'calibrated-instant-locks-twin-free-cards-in-every-segment',
+    run: () => runReplay({ calibrated: true, visualOnlyLockAllowed: false, languages: ['fr', 'en'] }),
+    requirements: { minSegmentCoverage: 1, lockSequence: ['test-a', 'test-b', 'test-a'] },
+  },
+  {
+    id: 'calibrated-artwork-twins-never-lock-without-printed-evidence',
+    run: () => runReplay({ calibrated: true, twinFree: false, languages: ['fr', 'en'] }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
+    // Japanese card matched to a Latin-only printing: the instant lock is withdrawn by the background
+    // language reads and the same printing is never locked again on this track.
+    id: 'calibrated-japanese-read-withdraws-latin-lock-and-never-relocks',
+    run: () => runReplay({ calibrated: true, languages: ['fr', 'en'], langRead: () => 'ja' }),
+    requirements: { minSegmentCoverage: 0, lockSequence: ['test-a'], maxLocksAfterRetraction: 0 },
+  },
 ];
 
 const results = scenarios.map(scenario => {

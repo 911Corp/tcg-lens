@@ -1,13 +1,16 @@
 import { cosine } from './VisualEmbeddingAdapter.js';
 import { PrecomputedIndex, INDEX_LANGS } from './PrecomputedIndex.js';
+import { DeepIndex } from './DeepIndex.js';
 
 /** 'auto' scans every language; otherwise a single language scope. */
 export function scopeLangs(lang) { return lang === 'auto' || !lang ? [...INDEX_LANGS] : [lang]; }
 
 export class ANNIndex {
-  constructor({ maxRefs = 1200, precomputed = null, prefilter = 24, rerank = 8 } = {}) {
+  constructor({ maxRefs = 1200, precomputed = null, deep = undefined, prefilter = 24, rerank = 8 } = {}) {
     this.maxRefs = maxRefs;
     this.pre = precomputed || new PrecomputedIndex();
+    // v0.3.5 calibrated instant index (null disables it, e.g. in Node tests).
+    this.deep = deep === undefined ? (typeof window !== 'undefined' ? new DeepIndex() : null) : deep;
     this.prefilter = prefilter;
     this.rerank = rerank;
     this.deepCache = new Map();
@@ -30,6 +33,15 @@ export class ANNIndex {
   async loadPrecomputed(lang, onProgress = () => {}) {
     const langs = scopeLangs(lang);
     this.preTarget = null;
+    // v0.3.5: calibrated deep index first (metadata + 128-d int8 vectors, no reference download).
+    if (this.deep) {
+      try {
+        await this.pre.load(langs, p => onProgress({ loaded: p.loaded, langs }), { vectors: false });
+        await Promise.all(langs.map(l => this.deep.loadLang(l, this.pre.metaRows(l))));
+        this.preTarget = this.pre.count(langs);
+        return true;
+      } catch (error) { this.deepError = String(error?.message || error); }
+    }
     try {
       // Expected totals are known only after load; report progress per language file.
       await this.pre.load(langs, p => onProgress({ loaded: p.loaded, langs }));
@@ -41,7 +53,8 @@ export class ANNIndex {
     }
   }
 
-  usesPrecomputed(lang) { return scopeLangs(lang).every(l => this.pre.isLoaded(l)); }
+  usesPrecomputed(lang) { return this.usesDeep(lang) || scopeLangs(lang).every(l => this.pre.isLoaded(l)); }
+  usesDeep(lang) { return Boolean(this.deep) && scopeLangs(lang).every(l => this.deep.isLoaded(l) && this.pre.hasMeta(l)); }
 
   async open() {
     if (this.db || typeof window === 'undefined' || !('indexedDB' in window)) return this.db;
@@ -65,7 +78,7 @@ export class ANNIndex {
   }
 
   count(lang) {
-    if (this.usesPrecomputed(lang)) return this.pre.count(scopeLangs(lang));
+    if (this.usesDeep(lang) || this.usesPrecomputed(lang)) return this.pre.count(scopeLangs(lang));
     const langs = scopeLangs(lang); let n = 0; for (const r of this.refs.values()) if (langs.includes(r.lang)) n++; return n;
   }
 
@@ -87,6 +100,7 @@ export class ANNIndex {
   }
 
   async query(canvas, lang, embedding, k = 6) {
+    if (this.usesDeep(lang)) return this._queryDeep(canvas, lang, embedding, k);
     if (this.usesPrecomputed(lang)) return this._queryPrecomputed(canvas, lang, embedding, k);
     if (!this.count(lang)) return [];
     const fastVector = embedding.fastDescriptor(canvas);
@@ -144,6 +158,32 @@ export class ANNIndex {
       const vecs = await embedding.embedBatch(canvases.filter(Boolean));
       ok.forEach((h, i) => { if (vecs[i]) this.deepCache.set(`${h.lang}:${h.id}`, vecs[i]); });
     } catch { await Promise.all(ok.map(h => this._deepFor(h, embedding))); }
+  }
+
+  /**
+   * v0.3.5 instant path: one model pass on the crop, learned-whitening projection, scores against
+   * every reference. Candidates carry their artwork twins and the margin to the best non-twin.
+   */
+  async _queryDeep(canvas, lang, embedding, k) {
+    const langs = scopeLangs(lang);
+    const deep = await embedding.embed(canvas);
+    if (!deep) return [];
+    const q = this.deep.project(deep, embedding.fastDescriptor(canvas));
+    const hits = this.deep.search(q, langs, 30);
+    if (!hits.length) return [];
+    const top = hits[0];
+    const twins = this.deep.twins(top.family, langs);
+    const twinIds = new Set(twins.map(t => t.id));
+    const nonTwin = hits.find(h => h !== top && !twinIds.has(h.id));
+    const out = hits.slice(0, Math.max(k, 1 + Math.min(twins.length, 6))).map(h => {
+      const c = this.pre.familyCandidate({ id: h.id, lang: h.languages[0] }, langs);
+      return { ...c, score: h.score, embeddingVerified: true, calibrated: true };
+    });
+    out[0].twins = twins.map(t => ({ id: t.id, languages: t.languages.filter(l => langs.includes(l)), similarity: t.similarity }));
+    out[0].marginNonTwin = top.score - (nonTwin?.score ?? 0);
+    // Scores of the twins (they are near the top) for language-based twin resolution.
+    out[0].twinScores = Object.fromEntries(hits.filter(h => twinIds.has(h.id)).map(h => [h.id, h.score]));
+    return out;
   }
 
   async _deepFor(hit, embedding) {

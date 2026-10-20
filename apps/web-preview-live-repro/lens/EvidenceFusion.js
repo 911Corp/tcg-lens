@@ -1,6 +1,10 @@
 import { DEFAULT_POLICY } from './config.js';
 import { ContradictionEngine } from './ContradictionEngine.js';
 
+function ocrPrintingSupportsEarly(ocr, candidateId) {
+  return Boolean(ocr?.candidateId === candidateId && ocr.collectorExact === true && !ocr.contradiction);
+}
+
 export class EvidenceFusion {
   constructor(policy = {}) {
     this.policy = { ...DEFAULT_POLICY, ...policy };
@@ -15,6 +19,13 @@ export class EvidenceFusion {
   evaluate(input) {
     const d = this._evaluate(input);
     const v = input.visual || {};
+    // Instant calibrated lock: identity is visual + calibrated; the language is never waited for.
+    // It is shown as unverified until printed text proves it (post-lock reads), unless a read already
+    // pointed to a language this printing does not exist in.
+    if (d.decision === 'LOCK' && d.reason === 'instant_calibrated_visual' && !v.resolvedLang && (v.languages?.length || 0) > 0) {
+      if (v.languageOutside || v.languageContradiction || v.languageProofRequired) return { decision: 'VERIFY', candidateId: d.candidateId, confidence: 0.85, reason: 'language_unresolved' };
+      return { ...d, languageUnverified: true };
+    }
     if (d.decision === 'LOCK' && d.reason !== 'verified_barcode' && v.languageContradiction) {
       // Printed text says the card is in a language this printing does not exist in.
       return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: `language_contradiction:${v.languageContradiction}` };
@@ -75,10 +86,26 @@ export class EvidenceFusion {
       return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: `candidate_lock_blocked:${visual.lockBlockedReason}` };
     }
 
+    // v0.3.5 instant calibrated visual lock (no OCR, no wait): calibrated index, no artwork twin,
+    // score and non-twin margin above the calibrated bars over ≥ instantVotes consecutive frames.
+    if (p.calibratedInstant && visual.calibrated === true && visual.embeddingVerified === true && !ocr?.contradiction) {
+      const instantOk = top.votes >= p.instantVotes && top.avgScore >= p.instantScore && top.avgMargin >= p.instantMargin && top.avgQuality >= p.instantMinQuality;
+      if (instantOk && visual.twinFree === true) {
+        const confidence = Math.min(0.99, 0.8 + (top.avgScore - p.instantScore) * 0.6 + Math.min(top.avgMargin, 0.3) * 0.4 + Math.min(top.votes, 6) * 0.01);
+        return { decision: 'LOCK', candidateId, confidence, reason: 'instant_calibrated_visual', evidence: { twins: 0 } };
+      }
+      // Same artwork in several printings (Japanese version, reprint): printed evidence picks one.
+      if (instantOk && visual.twinFree === false && !ocrPrintingSupportsEarly(ocr, candidateId)) {
+        return { decision: 'VERIFY', candidateId, confidence: 0.85, reason: 'artwork_twins' };
+      }
+    }
+
     if (!marginOk && top.votes >= p.minTemporalVotes) {
       return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: 'top1_top2_margin_too_small' };
     }
 
+    // On the calibrated scale the printed-evidence bar is the calibrated instant score.
+    const printedBar = visual.calibrated === true && p.calibratedInstant ? p.instantScore : (p.lockVisualScoreWithPrinting ?? p.lockVisualScore);
     const ocrPrintingSupports = Boolean(
       ocr?.candidateId === candidateId && ocr.collectorExact === true && !ocr.contradiction
     );
@@ -91,7 +118,7 @@ export class EvidenceFusion {
     // the set is indexed, so the visual margin really separates printings. Elsewhere a name read
     // alone still cannot lock an exact printing.
     if (p.lockWithPrintedName && visual.visualOnlyLockAllowed === true && votesOk && marginOk && qualityOk && ocrConceptSupports
-      && top.avgScore >= (p.lockVisualScoreWithPrinting ?? p.lockVisualScore) && visual.embeddingVerified === true) {
+      && top.avgScore >= printedBar && visual.embeddingVerified === true) {
       const confidence = Math.min(0.985, 0.7 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.01);
       if (!ocrPrintingSupports) return {
         decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_printed_name',
@@ -102,7 +129,7 @@ export class EvidenceFusion {
       return { decision: 'CONTINUE', candidateId, confidence: 0, reason: 'frame_quality_insufficient_for_lock' };
     }
 
-    const printingScoreOk = top.avgScore >= (p.lockVisualScoreWithPrinting ?? p.lockVisualScore) && visual.embeddingVerified === true;
+    const printingScoreOk = top.avgScore >= printedBar && visual.embeddingVerified === true;
     if (votesOk && printingScoreOk && marginOk && qualityOk && ocrPrintingSupports) {
       const confidence = Math.min(0.995, 0.72 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.012);
       return {

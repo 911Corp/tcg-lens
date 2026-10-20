@@ -125,3 +125,34 @@ mode) a tap anywhere starts the camera. Translucent controls, icon-only dock, no
 - Language grace: identity proven but language unreadable for 2.5 s → lock with the language shown as
   "Langue à confirmer (FR / EN)"; any read of a language the printing does not exist in still blocks.
 Tests 78/78, benchmark 15/15, FCIR 0.
+
+## v0.3.5 — Calibrated instant recognition
+
+**Why scans were slow and inconclusive.** The generic MobileNet embedding (ImageNet) recognises cards
+poorly under camera conditions: on held-out simulated camera crops it is right 94 % of the time on mild crops
+but only **30 %** on hard ones (glare, blur, exposure, misalignment). Each new card also downloaded ~8
+reference images at scan time, and locks waited for OCR (printed number twice, language).
+
+**What changed.**
+- *Learned whitening* (`tools/deep/`): reference descriptor = MobileNet embedding + fast layout/colour
+  descriptor, projected to 128-d by Cw^-1/2 (within-class covariance of 8 000 simulated camera crops) + PCA.
+  Held-out hard crops: top-1 **96 %** (vs 30 %), top-5 100 %.
+- *Precomputed* for all 40 616 references (`data/deep-index-{lang}.bin.gz`, int8, 3.7 MB + 0.7 MB model):
+  a scan = one model pass + one projection + 40 616 dot products (search 22 ms); no reference download.
+- *Artwork twins* (Japanese version, reprints, promos — 34 % of references at τ = 0.80) are found on the fly;
+  the instant margin is measured against the best non-twin family. Open-set test (true card removed from the
+  index): every high-confidence match was an artwork twin, never an unrelated card.
+- *Instant lock* (`CALIBRATED_POLICY`): twin-free, score ≥ 0.80, non-twin margin ≥ 0.06, 2 consecutive
+  frames, quality ≥ 0.35. Held-out: 54 % of single crops qualify, 0 wrong, 0 open-set non-twin false locks.
+  Twins → printed evidence (language picks JA vs FR/EN, number picks reprints).
+- *Language never blocks*: shown "à confirmer" at the instant lock and read in the background; a foreign
+  language read twice withdraws the lock and the printing then needs a proven language for the session.
+- *Every frame is compared* (110 ms cadence; previously only sharper frames), 2 tracking hits, OCR only when
+  needed, WebGL on real GPUs / WebAssembly on software WebGL (19 ms vs 276 ms per embedding), recognition
+  assets cache-first in the service worker.
+
+**Measured (headless Chromium, CPU, synthetic camera — not a phone):** identification ≈ 0.3 s after the
+first comparison; 3.6–5 s after opening the page, of which ~3 s is the first-launch model download
+(cached afterwards). FR card on busy table, FR on wood, EN card: instant lock; French proven in the
+background ~5 s later. JA Arceus V (Latin twins exist): locked on the right Japanese printing once
+Japanese was read. Tests 81/81, benchmark 18/18, FCIR 0.

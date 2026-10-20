@@ -1,0 +1,26 @@
+{
+ "schema": "tcg-lens-deep-index-v1",
+ "backbone": "mobilenet_v2_alpha0.5_embedding@tfjs-models/mobilenet@2.1.1",
+ "deepDims": 1280,
+ "fastDims": 236,
+ "inDims": 1516,
+ "dims": 128,
+ "fastWeight": 0.5,
+ "layout": "float32 mean[inDims] then float32 M[inDims x dims] row-major; index int8 = round(normalized*127)",
+ "training": {
+  "method": "learned whitening (within-class covariance of simulated camera crops) + PCA",
+  "regularization": 0.3,
+  "trainCrops": 8000,
+  "heldOutCrops": 1600
+ },
+ "calibration": {
+  "twinTau": 0.8,
+  "instantScore": 0.8,
+  "instantMargin": 0.06,
+  "heldOutTop1Mild": 0.97875,
+  "heldOutTop1Hard": 0.96,
+  "instantSingleFrame": 0.538125,
+  "closedWrong": 0,
+  "openSetNonTwinFalse": 0
+ }
+}

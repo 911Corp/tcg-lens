@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_POLICY, LENS_STATES } from '../../lens/config.js';
+import { DEFAULT_POLICY, LENS_STATES, CALIBRATED_POLICY } from '../../lens/config.js';
 import { TrackManager } from '../../lens/TrackManager.js';
 import { TemporalConsensus } from '../../lens/TemporalConsensus.js';
 import { EvidenceFusion } from '../../lens/EvidenceFusion.js';
@@ -28,8 +28,8 @@ export function expectedIdentityAtMs(t) {
 // ocrRead lets a scenario inject a raw printed-metadata read for the visual top (contradiction tests).
 // languages/langRead (v0.3.2 auto-language): the visual top is a family present in `languages`;
 // langRead({candidateId, t}) returns the language read from printed text on each OCR pass.
-export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null, lockBlockedReason = null, languages = null, langRead = null, autoLanguage = true } = {}) {
-  const policy = { ...DEFAULT_POLICY };
+export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null, lockBlockedReason = null, languages = null, langRead = null, autoLanguage = true, calibrated = false, twinFree = true } = {}) {
+  const policy = calibrated ? { ...DEFAULT_POLICY, ...CALIBRATED_POLICY } : { ...DEFAULT_POLICY };
   const events = [];
   let now = 0;
   const sm = new LensStateMachine(({ state, previous, detail, sequence, reset }) => events.push({ t: now, type: 'STATE', state, previous, detail, sequence, reset: Boolean(reset) }));
@@ -37,6 +37,7 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
   tracker.reset();
   const fusion = new EvidenceFusion(policy);
   let context = null;
+  const languageSuspects = new Set();
   sm.reset({ reason: 'camera_start' });
 
   function transition(next, detail = null) {
@@ -78,8 +79,9 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
   }
 
   function lock(decision) {
+    if (sm.state === LENS_STATES.ANALYZING) transition(LENS_STATES.VERIFYING, { candidateId: decision.candidateId, reason: decision.reason });
     if (!transition(LENS_STATES.LOCKED, { id: decision.candidateId, reason: decision.reason, confidence: decision.confidence })) return false;
-    context.locked = { id: decision.candidateId, confidence: decision.confidence };
+    context.locked = { id: decision.candidateId, confidence: decision.confidence, languageUnverified: decision.languageUnverified === true };
     events.push({ t: now, type: 'LOCK', candidateId: decision.candidateId, reason: decision.reason, confidence: decision.confidence, expected: expectedIdentityAtMs(now) });
     return true;
   }
@@ -91,6 +93,7 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
     v.languageWaitMs = context.langWait ? now - context.langWait.since : 0;
     const decision = fusion.evaluate({ temporal, visual: context.visualEvidence, ocr: context.ocrEvidence, canonical: { conflict: false } });
     events.push({ t: now, type: 'FUSION', decision, temporal: temporal.top, temporalEpoch: temporal.epoch, temporalAction: temporal.lastAction });
+    if (context.blockedId && decision.decision === 'LOCK' && decision.candidateId === context.blockedId) { events.push({ t: now, type: 'FUSION', decision: { decision: 'AMBIGUOUS', reason: 'retracted' } }); transition(LENS_STATES.AMBIGUOUS, { reason: 'retracted' }); return; }
     if (decision.reason === 'language_unresolved' && !context.langWait) context.langWait = { id: decision.candidateId, since: now };
     if (decision.decision === 'LOCK') lock(decision);
     else if (decision.decision === 'AMBIGUOUS') transition(LENS_STATES.AMBIGUOUS, { reason: decision.reason });
@@ -138,6 +141,23 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
     context.lastVisualAt = now;
     const id = row.top === 'a' ? 'test-a' : 'test-b';
     const candidate = { id, score: row.score, margin: row.margin, embeddingVerified: true };
+    // Post-lock background language read (runtime _afterLockLanguage): a foreign language read twice
+    // withdraws the identification.
+    if (languages && langRead && context.locked?.languageUnverified && now - context.lastLangAt >= policy.ocrIntervalMs) {
+      context.lastLangAt = now;
+      context.langConsensus.observe(id, langRead({ candidateId: id, t: now }), languages);
+      const contra = context.langConsensus.contradicted(id, languages);
+      if (contra) {
+        events.push({ t: now, type: 'LOCK_RETRACTED', candidateId: context.locked.id, reason: contra });
+        const blocked = context.locked.id;
+        languageSuspects.add(blocked);
+        const tr = tracker.bumpGeneration();
+        newContext(tr, { resetState: true, reason: 'lock_retracted' });
+        context.blockedId = blocked;
+        for (const st of [LENS_STATES.TRACKING, LENS_STATES.ANALYZING, LENS_STATES.AMBIGUOUS]) transition(st, { reason: 'lock_retracted' });
+        continue;
+      }
+    }
     if (languages && langRead && !context.locked && now - context.lastLangAt >= policy.ocrIntervalMs) {
       context.lastLangAt = now;
       const lang = langRead({ candidateId: id, t: now });
@@ -147,7 +167,7 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
     const resolvedLang = languages ? context.langConsensus.resolved(id, languages) : null;
     const languageContradiction = languages ? context.langConsensus.contradicted(id, languages) : null;
     const languageOutside = languages ? context.langConsensus.outside(id, languages) : false;
-    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction, languageOutside };
+    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction, languageOutside, calibrated, twinFree: calibrated ? twinFree : undefined, languageProofRequired: languageSuspects.has(id) };
     const temporal = context.consensus.observe({ candidateId: id, score: row.score, margin: row.margin, quality: 0.8, at: now });
     events.push({ t: now, type: 'VISUAL', candidateId: id, score: row.score, margin: row.margin, temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction, temporalEpoch: temporal.epoch, locked: context.locked?.id || null });
     if (!context.locked && corroborateB && id === 'test-b' && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4 && now - context.lastOcrAt >= policy.ocrIntervalMs) {

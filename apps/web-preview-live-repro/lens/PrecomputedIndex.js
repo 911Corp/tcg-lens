@@ -19,29 +19,41 @@ export class PrecomputedIndex {
     this.loading = new Map();
   }
 
-  isLoaded(lang) { return this.langs.has(lang); }
+  isLoaded(lang) { return Boolean(this.langs.get(lang)?.vec); }
+  hasMeta(lang) { return this.langs.has(lang); }
+  metaRows(lang) { const L = this.langs.get(lang); return L ? { count: L.meta.count, rows: L.meta.rows, col: L.col } : null; }
   count(langs = INDEX_LANGS) { let n = 0; for (const l of langs) n += this.langs.get(l)?.meta.count ?? 0; return n; }
 
-  /** Loads the given languages in parallel. onProgress({ loaded, total }) counts references. */
-  async load(langs = INDEX_LANGS, onProgress = () => {}) {
-    const pending = langs.filter(l => !this.langs.has(l));
+  /**
+   * Loads the given languages in parallel. onProgress({ loaded, total }) counts references.
+   * `vectors: false` loads metadata only (v0.3.5: the calibrated DeepIndex replaces the per-reference
+   * fast vectors at scan time).
+   */
+  async load(langs = INDEX_LANGS, onProgress = () => {}, { vectors = true } = {}) {
+    const pending = langs.filter(l => !this.langs.has(l) || (vectors && !this.langs.get(l).vec));
     await Promise.all(pending.map(lang => {
-      if (!this.loading.has(lang)) this.loading.set(lang, this._loadLang(lang).finally(() => onProgress({ loaded: this.count(langs), lang })));
-      return this.loading.get(lang);
+      const key = `${lang}:${vectors ? 'v' : 'm'}`;
+      if (!this.loading.has(key)) this.loading.set(key, this._loadLang(lang, vectors).finally(() => onProgress({ loaded: this.count(langs), lang })));
+      return this.loading.get(key);
     }));
     return this.count(langs);
   }
 
-  async _loadLang(lang) {
+  async _loadLang(lang, vectors = true) {
     const [metaRes, buffer] = await Promise.all([
-      this.fetchImpl(`${this.base}/visual-index-${lang}.json`),
-      this._fetchVectors(lang),
+      this.langs.has(lang) ? null : this.fetchImpl(`${this.base}/visual-index-${lang}.json`),
+      vectors ? this._fetchVectors(lang) : null,
     ]);
+    if (!metaRes) { // metadata already loaded: only attach the vectors
+      const L = this.langs.get(lang); const vec = new Int8Array(buffer);
+      if (vec.length !== L.meta.count * L.meta.dims) throw new Error(`visual index ${lang} size mismatch`);
+      L.vec = vec; return;
+    }
     if (!metaRes.ok) throw new Error(`visual index ${lang} unavailable`);
     const meta = await metaRes.json();
     if (meta.schema !== INDEX_SCHEMA) throw new Error(`unexpected index schema ${meta.schema}`);
-    const vec = new Int8Array(buffer);
-    if (vec.length !== meta.count * meta.dims) throw new Error(`visual index ${lang} size mismatch`);
+    const vec = buffer ? new Int8Array(buffer) : null;
+    if (vec && vec.length !== meta.count * meta.dims) throw new Error(`visual index ${lang} size mismatch`);
     const col = Object.fromEntries(meta.columns.map((c, i) => [c, i]));
     this.langs.set(lang, { meta, vec, dims: meta.dims, col });
     meta.rows.forEach((row, i) => {
@@ -96,7 +108,7 @@ export class PrecomputedIndex {
   fastTop(query, langs = INDEX_LANGS, n = 24) {
     const best = new Map();
     for (const lang of langs) {
-      const L = this.langs.get(lang); if (!L) continue;
+      const L = this.langs.get(lang); if (!L?.vec) continue;
       const { vec, dims, meta, col } = L;
       for (let i = 0, off = 0; i < meta.count; i++, off += dims) {
         let s = 0;
