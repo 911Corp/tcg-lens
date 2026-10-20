@@ -5,6 +5,11 @@ import { DeepIndex } from './DeepIndex.js';
 /** 'auto' scans every language; otherwise a single language scope. */
 export function scopeLangs(lang) { return lang === 'auto' || !lang ? [...INDEX_LANGS] : [lang]; }
 
+import { uiLang } from './i18nRef.js';
+
+// Display row while the language is unproven: the app language first, then French/English, then Japanese.
+const displayOrder = () => [uiLang(), 'fr', 'en', 'ja'];
+
 export class ANNIndex {
   constructor({ maxRefs = 1200, precomputed = null, deep = undefined, prefilter = 24, rerank = 8 } = {}) {
     this.maxRefs = maxRefs;
@@ -183,7 +188,8 @@ export class ANNIndex {
     const twinIds = new Set(twins.map(t => t.id));
     const nonTwin = hits.find(h => h !== top && !twinIds.has(h.id));
     const out = hits.slice(0, Math.max(k, 1 + Math.min(twins.length, 6))).map(h => {
-      const c = this.pre.familyCandidate({ id: h.id, lang: h.languages[0] }, langs);
+      // Display row while the language is unproven: the app language first (French), then English, then Japanese.
+      const c = this.pre.familyCandidate({ id: h.id, lang: displayOrder().find(l => h.languages.includes(l)) || h.languages[0] }, langs);
       return { ...c, score: h.score, embeddingVerified: true, calibrated: true };
     });
     out[0].twins = twins.map(t => ({ id: t.id, languages: t.languages.filter(l => langs.includes(l)), similarity: t.similarity }));

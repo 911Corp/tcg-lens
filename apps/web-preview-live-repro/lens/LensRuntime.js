@@ -270,6 +270,7 @@ export class LensRuntime {
       if (this.barcodeSeenAt && at - this.barcodeSeenAt > 6000) { this.barcodeSeenAt = null; document.dispatchEvent(new CustomEvent('tcglens:barcode-gone')); }
       return;
     }
+    this._healFrameWorker(at);
     if (this.multiMode) { await this.multi.tick(at); this._hud(); this._maybeBarcode(at); return; }
     const d0 = performance.now();
     const opts = { angleHint: this.tracker.track?.angle ?? undefined };
@@ -603,7 +604,8 @@ export class LensRuntime {
     const resolved = c.visualEvidence?.candidateId === candidate.id ? c.visualEvidence.resolvedLang : null;
     // Unproven language: display the printing in the phone's language when it exists (name only;
     // the language itself stays "à confirmer").
-    const uiLang = (typeof navigator !== 'undefined' ? navigator.language || 'fr' : 'fr').slice(0, 2);
+    // The app's own language (the interface is French), not the phone's.
+    const uiLang = (typeof document !== 'undefined' && document.documentElement.lang || 'fr').slice(0, 2);
     const row = (resolved && candidate.byLang?.[resolved]) || (candidate.languages?.length === 1 && candidate.byLang?.[candidate.languages[0]])
       || (decision.languageUnverified && candidate.byLang?.[uiLang]) || candidate;
     const { byLang, languages, ...printing } = row;
@@ -615,7 +617,7 @@ export class LensRuntime {
     this.marketOverlay.showLocked(identity, decision.confidence);
     this._renderTrack(this.tracker.track);
     this._hud(true);
-    navigator.vibrate?.(12);
+    if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(12);
     return true;
   }
 
@@ -650,6 +652,38 @@ export class LensRuntime {
     this.telemetry.emit('MULTI_MODE', { on });
     this._hud(true);
     return true;
+  }
+
+  /**
+   * v0.4.0 — the frame worker recovers by itself: after a failure (timeout, crash) a new one is started
+   * 10 s later, at most 3 times per session; meanwhile the in-page path keeps scanning.
+   */
+  _healFrameWorker(at) {
+    const f = this.frames;
+    if (!f?.broken) return;
+    this.frameRestarts = this.frameRestarts || 0;
+    if (this.frameRestarts >= 3) return;
+    if (!this.frameBrokenAt) { this.frameBrokenAt = at; this.telemetry.emit('FRAME_WORKER_DOWN', { reason: f.reason }); return; }
+    if (at - this.frameBrokenAt < 10000) return;
+    this.frameRestarts++; this.frameBrokenAt = 0;
+    this.frames = new FrameWorker(); this.detector.frames = this.frames;
+    this.telemetry.emit('FRAME_WORKER_RESTART', { attempt: this.frameRestarts });
+  }
+
+  /** v0.4.0 — app language changed: re-render the HUD, the result (name row, market) and the multi-card labels. */
+  onUiLanguage() {
+    const c = this.context;
+    if (c?.locked && !c.locked.dismissed) {
+      const id = c.locked.identity;
+      if (id.languageUnverified) {
+        const cand = c.visualCandidates?.find(x => x.id === c.locked.id);
+        const row = cand?.byLang?.[(document.documentElement.lang || 'fr').slice(0, 2)];
+        if (row) { const { byLang, languages, ...printing } = row; c.locked.identity = { ...printing, lang: null, languageUnverified: true, languageCandidates: id.languageCandidates }; }
+      }
+      this.marketOverlay.showLocked(c.locked.identity, c.locked.confidence);
+    }
+    if (this.multi) { this.multi.prices.clear(); this.multi.render(); }
+    this.lastHudAt = 0; this._hud(true);
   }
 
   /** Release the identified card (left the image): result hidden, a new analysis starts. */

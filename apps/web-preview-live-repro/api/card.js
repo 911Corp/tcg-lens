@@ -6,15 +6,17 @@ const pricesFile = process.env.TCG_LENS_POOL_DIR ? `${process.env.TCG_LENS_POOL_
 let pricesP = null;
 const canonicalPrices = () => (pricesP ??= readFile(pricesFile, 'utf8').then(JSON.parse).catch(() => ({ prices: {} })));
 /** Canonical price entry → {market, cardmarket-like pricing for Heat}. TCGplayer: one sub-type → its price; several → the lowest, flagged `from`. */
-export function marketFromCanonical(entry, asOf = null) {
+export function marketFromCanonical(entry, asOf = null, prefer = 'eu') {
   if (!entry) return null;
   const [trend, avg1, avg7, avg30, low] = entry.cm || [];
   const center = [trend, avg7, avg30, avg1].find(v => Number(v) > 0) ?? null;
-  if (center != null) return { market: { center, low: low ?? null, high: null, currency: 'EUR', updated: asOf, source: 'Cardmarket' }, pricing: { cardmarket: { trend, avg1, avg7, avg30, low } } };
-  const tp = Object.entries(entry.tp || {}).filter(([, v]) => Number(v) > 0);
-  if (!tp.length) return null;
-  const min = Math.min(...tp.map(([, v]) => v));
-  return { market: { center: min, low: null, high: null, currency: 'USD', updated: asOf, source: 'TCGplayer', from: tp.length > 1, subtypes: Object.fromEntries(tp) }, pricing: {} };
+  const pricing = center != null ? { cardmarket: { trend, avg1, avg7, avg30, low } } : {};
+  const cm = center != null ? { market: { center, low: low ?? null, high: null, currency: 'EUR', updated: asOf, source: 'Cardmarket' }, pricing } : null;
+  const tpRows = Object.entries(entry.tp || {}).filter(([, v]) => Number(v) > 0);
+  // Cardmarket momentum still feeds Heat when the TCGplayer price is shown.
+  const tp = tpRows.length ? { market: { center: Math.min(...tpRows.map(([, v]) => v)), low: null, high: null, currency: 'USD', updated: asOf, source: 'TCGplayer', from: tpRows.length > 1, subtypes: Object.fromEntries(tpRows) }, pricing } : null;
+  // v0.4.0: preferred market follows the app language (us → TCGplayer USD, eu → Cardmarket EUR), the other one as fallback.
+  return prefer === 'us' ? (tp || cm) : (cm || tp);
 }
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 function heatFromPricing(p){
@@ -35,8 +37,9 @@ function heatFromPricing(p){
   const trend=momentum>0.04?'HEATING':momentum<-0.04?'COOLING':'STABLE';
   return {score,label,trend,confidence:'LOW',beta:true,coverage:.10,weights,components:{salesVelocity:null,sellThrough:null,demandMomentum:null,marketDepth:null,priceMomentum},momentum:Number(momentum.toFixed(4)),reason:'Heat Beta partial estimate: only Price Momentum is available here (10% of the target Heat model). Sales velocity, sell-through, demand momentum and market depth are not fabricated.'};
 }
-function marketFromPricing(p){
-  const cm=p?.cardmarket||null, tp=p?.tcgplayer||null;
+function marketFromPricing(p,prefer='eu'){
+  let cm=p?.cardmarket||null, tp=p?.tcgplayer||null;
+  if(prefer==='us'&&tp&&Object.values(tp).some(v=>v&&typeof v==='object'&&(Number(v.marketPrice)>0||Number(v.midPrice)>0)))cm=null;
   let center=null,low=null,high=null,currency='EUR',updated=null;
   if(cm){
     const centerCandidates=[cm.trend,cm.avg7,cm.avg30,cm.avg,cm.avg1].map(Number).filter(v=>Number.isFinite(v)&&v>0);
@@ -58,7 +61,8 @@ export default async function handler(req,res){
     const alts=String(req.query.langs||'').split(',').filter(l=>LANGS.has(l)&&l!==lang);
     const store=await canonicalPrices();
     const priceLang=[lang,...alts].find(l=>store.prices?.[`${l}:${id}`]);
-    const canon=priceLang?marketFromCanonical(store.prices[`${priceLang}:${id}`],store.asOf):null;
+    const prefer=String(req.query.market||'')==='us'?'us':'eu';
+    const canon=priceLang?marketFromCanonical(store.prices[`${priceLang}:${id}`],store.asOf,prefer):null;
     // TCGdex details (not available for printings imported from TCGplayer: their id is a canonical UUID).
     let c=null;
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)){
@@ -75,8 +79,9 @@ export default async function handler(req,res){
       if(!c.image&&pooled.image)c.image=pooled.image.replace(/\/low\.webp$/,'');
     }
     const pricing=canon?canon.pricing:(c.pricing||{});
-    const market=canon?canon.market:{...marketFromPricing(pricing),source:pricing.cardmarket?'Cardmarket':pricing.tcgplayer?'TCGplayer':null};
+    const fromTd=canon?null:marketFromPricing(pricing,prefer);
+    const market=canon?canon.market:{...fromTd,source:fromTd.currency==='USD'?'TCGplayer':pricing.cardmarket?'Cardmarket':null};
     const body={id:c.id,name:c.name||null,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?(/\.(jpe?g|png|webp)$/i.test(c.image)?c.image:`${c.image}/high.webp`):null,market,priceLang:canon?priceLang:lang,heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
-    res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=3600'); return res.status(200).json(body);
+    res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=3600'); res.setHeader('Vary','Accept-Encoding'); return res.status(200).json(body);
   }catch(e){return res.status(500).json({error:String(e?.message||e)});}
 }

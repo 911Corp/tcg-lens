@@ -21,7 +21,7 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 95/95,
+Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 98/98,
 benchmark 19/19 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
@@ -53,7 +53,7 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
   `tools/stamp-index-version.mjs` (done by `deploy-preview.sh`) after any index rebuild.
 
 ## Lens interface rules (v0.3.2)
-- All user-facing scanner text comes from `lens/LensHud.js` (`describeHud`): plain French, actionable, never machine state names.
+- All user-facing scanner text comes from `lens/LensHud.js` (`describeHud`): plain French source strings, actionable, never machine state names. Every visible string must exist in `/i18n.js` (English written for English-speaking collectors, not word for word); `test/lens-i18n.test.js` enforces it.
 - The scanner status is a traffic light (red/orange/green); text only when the user must act or taps it. Messages hold ≥ 700 ms; the outline follows the tracked quad; holo outline only when LOCKED.
 - Card detection is the straight-edge rectangle search (`lens/EdgeRectDetector.js`); keep its synthetic benchmark ≥ 80 % correct and 0 detections on empty tables.
 - No Identify button, no candidate picker. The app opens directly on the live scanner; catalogue, collection,

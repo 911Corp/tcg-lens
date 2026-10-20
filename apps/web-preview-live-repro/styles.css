@@ -410,3 +410,6 @@ video::-webkit-media-controls-overlay-play-button { display: none !important; -w
 .mc-bar b { font-weight: 700; }
 .mc-add { border: 0; border-radius: 999px; padding: 8px 14px; background: rgba(79,224,138,.3); color: #e7fff0; font: 600 13px var(--text); }
 .camera-top > .mode-btn { right: auto; left: 0; }
+.lang-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); margin-top: 10px; }
+.lang-seg button { border: 0; border-radius: 10px; padding: 10px; background: transparent; color: var(--dim); font: 600 15px var(--text); }
+.lang-seg button.on { background: rgba(255,255,255,.14); color: var(--chalk); }

@@ -1,16 +1,19 @@
 // v0.3.9 — collection panel: quantities, value, sort, CSV export, price refresh, one-tap add from the scanner.
 import { addItem, setQty, removeItem, totals, sorted, toCSV, migrate } from './lens/collectionModel.js';
+import { t, money as fmtMoney, uiLang } from './lens/i18nRef.js';
 
 const KEY = 'collection';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
 const read = () => { try { return migrate(JSON.parse(localStorage.getItem(KEY)) || []); } catch { return []; } };
 const write = list => { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch {} };
-const money = (v, c = 'EUR') => { try { return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c, maximumFractionDigits: v >= 100 ? 0 : 2 }).format(v); } catch { return `${v} ${c}`; } };
+const money = (v, c = 'EUR') => fmtMoney(v, c);
 const toast = msg => window.toast?.(msg);
 // `state` is a top-level const of app-1.js (global lexical scope, not a window property).
 const shellState = () => (typeof state !== 'undefined' ? state : null); // eslint-disable-line no-undef
 const LANG = { fr: 'FR', en: 'EN', ja: 'JA' };
+// Re-render on app-language change.
+document.addEventListener('tcglens:uilang', () => { if (shellState()?.screen === 'collection') render(); });
 let sortBy = (() => { try { return localStorage.getItem('collectionSort') || 'recent'; } catch { return 'recent'; } })();
 
 function numberLabel(localId, total) {
@@ -27,7 +30,7 @@ function entryFromCurrent(c) {
 function add(entry, qty = 1) {
   const { list, item, added } = addItem(read(), entry, qty);
   write(list);
-  toast(added ? `Ajouté à la collection` : `Ajouté à la collection (×${item.qty})`);
+  toast(added ? t('Ajouté à la collection') : `${t('Ajouté à la collection')} (×${item.qty})`);
   if (shellState()?.screen === 'collection') render();
   return item;
 }
@@ -53,22 +56,22 @@ function render() {
   const body = $('#collectionBody'); if (!body) return;
   const list = read();
   if (!list.length) {
-    body.innerHTML = '<div class="collection-empty">Votre collection est vide.<br>Scannez une carte puis touchez <b>＋</b> sur le résultat, ou ouvrez une fiche et touchez « Ajouter à la collection ».</div>';
+    body.innerHTML = `<div class="collection-empty">${esc(t('Votre collection est vide.'))}<br>${uiLang() === 'en' ? 'Scan a card and tap <b>＋</b> on the result, or open a card and tap “Add to collection”.' : 'Scannez une carte puis touchez <b>＋</b> sur le résultat, ou ouvrez une fiche et touchez « Ajouter à la collection ».'}</div>`;
     return;
   }
-  const t = totals(list);
-  const value = Object.entries(t.byCurrency).map(([c, v]) => money(v, c)).join(' + ') || '—';
+  const tot = totals(list);
+  const value = Object.entries(tot.byCurrency).map(([c, v]) => money(v, c)).join(' + ') || '—';
   body.innerHTML = `
     <div class="coll-summary">
-      <div><span class="coll-k">Cartes et produits</span><b>${t.count}</b></div>
-      <div><span class="coll-k">Valeur estimée</span><b>${esc(value)}</b>${t.priced < t.count ? `<small>${t.count - t.priced} sans prix</small>` : ''}</div>
+      <div><span class="coll-k">${esc(t('Cartes et produits'))}</span><b>${tot.count}</b></div>
+      <div><span class="coll-k">${esc(t('Valeur estimée'))}</span><b>${esc(value)}</b>${tot.priced < tot.count ? `<small>${esc(t('{n} sans prix', { n: tot.count - tot.priced }))}</small>` : ''}</div>
     </div>
     <div class="coll-tools">
-      <select id="collSort" aria-label="Trier">
-        ${[['recent', 'Plus récents'], ['value', 'Valeur'], ['name', 'Nom'], ['set', 'Extension']].map(([k, l]) => `<option value="${k}"${k === sortBy ? ' selected' : ''}>${l}</option>`).join('')}
+      <select id="collSort" aria-label="${esc(t('Trier'))}">
+        ${[['recent', 'Plus récents'], ['value', 'Valeur'], ['name', 'Nom'], ['set', 'Extension']].map(([k, l]) => `<option value="${k}"${k === sortBy ? ' selected' : ''}>${esc(t(l))}</option>`).join('')}
       </select>
-      <button type="button" class="chip" id="collRefresh">Actualiser les prix</button>
-      <button type="button" class="chip" id="collExport">Exporter (CSV)</button>
+      <button type="button" class="chip" id="collRefresh">${esc(t('Actualiser les prix'))}</button>
+      <button type="button" class="chip" id="collExport">${esc(t('Exporter (CSV)'))}</button>
     </div>
     <ul class="coll-list">${sorted(list, sortBy).map(x => `
       <li class="coll-item" data-key="${esc(x.key)}">
@@ -76,10 +79,10 @@ function render() {
         <div class="coll-info">
           <b>${esc(x.name)}</b>
           <small>${esc([x.setName, x.number, langLabel(x)].filter(Boolean).join(' · '))}</small>
-          <span class="coll-price">${x.market?.center != null ? `${x.market.from ? 'dès ' : ''}${esc(money(x.market.center, x.market.currency))}${x.qty > 1 ? ` <small>× ${x.qty} = ${esc(money(Math.round(x.market.center * x.qty * 100) / 100, x.market.currency))}</small>` : ''}` : '<small>Prix n.d.</small>'}</span>
+          <span class="coll-price">${x.market?.center != null ? `${esc(x.market.from ? t('dès {price}', { price: money(x.market.center, x.market.currency) }) : money(x.market.center, x.market.currency))}${x.qty > 1 ? ` <small>× ${x.qty} = ${esc(money(Math.round(x.market.center * x.qty * 100) / 100, x.market.currency))}</small>` : ''}` : `<small>${esc(t('Prix n.d.'))}</small>`}</span>
         </div>
-        <div class="coll-qty" role="group" aria-label="Quantité">
-          <button type="button" data-q="-1" aria-label="Retirer un exemplaire">−</button><span>${x.qty}</span><button type="button" data-q="1" aria-label="Ajouter un exemplaire">+</button>
+        <div class="coll-qty" role="group" aria-label="${esc(t('Quantité'))}">
+          <button type="button" data-q="-1" aria-label="${esc(t('Retirer un exemplaire'))}">−</button><span>${x.qty}</span><button type="button" data-q="1" aria-label="${esc(t('Ajouter un exemplaire'))}">+</button>
         </div>
       </li>`).join('')}
     </ul>`;
@@ -91,7 +94,7 @@ function render() {
     li.querySelector('.coll-open').onclick = () => { if (item.kind === 'card') window.openCard?.(item.id, item.lang || item.languageCandidates?.[0] || 'fr'); else window.openSealed?.(item); };
     li.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
       const q = item.qty + Number(b.dataset.q);
-      if (q <= 0) { write(removeItem(read(), key)); toast('Retiré de la collection'); } else write(setQty(read(), key, q));
+      if (q <= 0) { write(removeItem(read(), key)); toast(t('Retiré de la collection')); } else write(setQty(read(), key, q));
       render();
     });
   });
@@ -99,23 +102,23 @@ function render() {
 window.renderCollection = render;
 
 function exportCSV() {
-  const blob = new Blob([toCSV(read())], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([toCSV(read(), { lang: uiLang() })], { type: 'text/csv;charset=utf-8' });
   const name = `tcg-lens-collection-${new Date().toISOString().slice(0, 10)}.csv`;
   const file = typeof File === 'function' ? new File([blob], name, { type: 'text/csv' }) : null;
-  if (file && navigator.canShare?.({ files: [file] })) { navigator.share({ files: [file], title: 'Collection TCG Lens' }).catch(() => {}); return; }
+  if (file && navigator.canShare?.({ files: [file] })) { navigator.share({ files: [file], title: uiLang() === 'en' ? 'TCG Lens collection' : 'Collection TCG Lens' }).catch(() => {}); return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 async function refreshPrices() {
-  const btn = $('#collRefresh'); if (btn) { btn.disabled = true; btn.textContent = 'Actualisation…'; }
+  const btn = $('#collRefresh'); if (btn) { btn.disabled = true; btn.textContent = t('Actualisation…'); }
   const cards = read().filter(x => x.kind === 'card');
   let updated = 0;
   for (let i = 0; i < cards.length; i += 4) {
     await Promise.all(cards.slice(i, i + 4).map(async x => {
       try {
         const langs = x.languageCandidates?.join(',') || '';
-        const r = await fetch(`/api/card?id=${encodeURIComponent(x.id)}&lang=${encodeURIComponent(x.lang || x.languageCandidates?.[0] || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}`);
+        const r = await fetch(`/api/card?id=${encodeURIComponent(x.id)}&lang=${encodeURIComponent(x.lang || x.languageCandidates?.[0] || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}&market=${uiLang() === 'en' ? 'us' : 'eu'}`);
         if (!r.ok) return;
         const c = await r.json();
         if (c.market?.center == null) return;
@@ -126,6 +129,6 @@ async function refreshPrices() {
       } catch {}
     }));
   }
-  toast(updated ? `${updated} prix actualisé${updated > 1 ? 's' : ''}` : 'Aucun prix à actualiser');
+  toast(updated ? (uiLang() === 'en' ? `${updated} price${updated > 1 ? 's' : ''} refreshed` : `${updated} prix actualisé${updated > 1 ? 's' : ''}`) : t('Aucun prix à actualiser'));
   render();
 }

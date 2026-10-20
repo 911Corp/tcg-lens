@@ -23,3 +23,12 @@ test('sheet: "dès" unless the finish is proven; price language shown while the 
   const proven = lockedSheetModel({ id: 'x', name: 'Charizard', lang: 'en', variantProven: true }, card);
   assert.doesNotMatch(proven.price, /dès/); assert.equal(proven.priceSource, 'TCGplayer');
 });
+
+test('preferred market follows the app language', () => {
+  const e = { cm: [12.5, 11, 13, 14, 9], tp: { Holofoil: 15.2 } };
+  assert.equal(marketFromCanonical(e, null, 'eu').market.source, 'Cardmarket');
+  const us = marketFromCanonical(e, null, 'us');
+  assert.equal(us.market.source, 'TCGplayer'); assert.equal(us.market.center, 15.2);
+  assert.equal(us.pricing.cardmarket.trend, 12.5, 'Cardmarket momentum still feeds Heat');
+  assert.equal(marketFromCanonical({ cm: [12.5] }, null, 'us').market.source, 'Cardmarket', 'falls back when TCGplayer has no price');
+});

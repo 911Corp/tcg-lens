@@ -3,15 +3,14 @@
  * market data is loaded only after LOCK and never influences identity. Every async load carries a
  * sequence token so a late response can never paint a previous card's price onto a new card.
  */
-const money = (value, currency = 'EUR') => {
-  if (value == null || !Number.isFinite(Number(value))) return null;
-  try { return new Intl.NumberFormat('fr-FR', { style: 'currency', currency, maximumFractionDigits: Number(value) >= 100 ? 0 : 2 }).format(Number(value)); }
-  catch { return `${Number(value).toFixed(2)} ${currency}`; }
-};
+import { t, money, uiLang } from './i18nRef.js';
 
-export const HEAT_LABELS = Object.freeze({ COLD: 'Froid', COOL: 'Frais', WARM: 'Tiède', HOT: 'Chaud', SURGING: 'En flambée' });
-export const TREND_LABELS = Object.freeze({ HEATING: { arrow: '↗', text: 'En hausse' }, COOLING: { arrow: '↘', text: 'En baisse' }, STABLE: { arrow: '→', text: 'Stable' } });
-const LANG = { fr: 'Français', en: 'Anglais', ja: 'Japonais' };
+const HEAT_FR = { COLD: 'Froid', COOL: 'Frais', WARM: 'Tiède', HOT: 'Chaud', SURGING: 'En flambée' };
+export const HEAT_LABELS = new Proxy(HEAT_FR, { get: (o, k) => (k in o ? t(o[k]) : undefined) });
+const TREND_FR = { HEATING: { arrow: '↗', text: 'En hausse' }, COOLING: { arrow: '↘', text: 'En baisse' }, STABLE: { arrow: '→', text: 'Stable' } };
+export const TREND_LABELS = new Proxy(TREND_FR, { get: (o, k) => (k in o ? { ...o[k], text: t(o[k].text) } : undefined) });
+const LANG_FR = { fr: 'Français', en: 'Anglais', ja: 'Japonais' };
+const LANG = new Proxy(LANG_FR, { get: (o, k) => (k in o ? t(o[k]) : undefined) });
 
 /** Pure view model for the sheet (testable). */
 export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
@@ -22,20 +21,20 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
   const total = identity.printedTotal ?? c.set?.cardCount?.official ?? null;
   const amount = money(market.center, market.currency || 'EUR');
   // Several TCGplayer finishes priced and the finish not proven: lowest price, shown as "dès …".
-  const price = amount && market.from && !identity.variantProven ? `dès ${amount}` : amount;
+  const price = amount && market.from && !identity.variantProven ? t('dès {price}', { price: amount }) : amount;
   const source = market.source || (market.currency === 'USD' ? 'TCGplayer' : amount ? 'Cardmarket' : null);
   // Price of another language's printing (language not proven yet): say which one.
   const priceLangNote = c.priceLang && (identity.languageUnverified || (identity.lang && c.priceLang !== identity.lang)) ? ` (${String(c.priceLang).toUpperCase()})` : '';
   const trend = TREND_LABELS[heat.trend] || null;
   return {
     // The identity name stays (no flip once the market data arrives in another language).
-    name: identity.name || c.name || 'Carte',
-    setName: identity.setName || c.set?.name || c.set?.id || 'Extension inconnue',
+    name: identity.name || c.name || t('Carte'),
+    setName: identity.setName || c.set?.name || c.set?.id || t('Extension inconnue'),
     // Printed form: the total is zero-padded like the number ("001/084").
     number: total ? `${number}/${/^\d+$/.test(number) ? String(total).padStart(number.length, '0') : total}` : number,
     // Language only when proven; otherwise say so (FR and EN share the printing).
     language: identity.languageUnverified
-      ? (identity.languageCandidates?.length > 1 ? `${identity.languageCandidates.map(l => l.toUpperCase()).join('/')} ?` : 'Langue ?')
+      ? (identity.languageCandidates?.length > 1 ? `${identity.languageCandidates.map(l => l.toUpperCase()).join('/')} ?` : t('Langue ?'))
       : LANG[identity.lang || c.lang] || (identity.lang || '').toUpperCase(),
     variant: identity.variantProven ? (identity.variantLabel || null) : null,
     confidence: Math.round((confidence || 0) * 100),
@@ -66,7 +65,7 @@ export class MarketOverlay {
     let card = null;
     try {
       const langs = (identity.languageCandidates || []).join(',');
-      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || identity.languageCandidates?.[0] || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}`);
+      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || identity.languageCandidates?.[0] || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}&market=${uiLang() === 'en' ? 'us' : 'eu'}`);
       if (response.ok) card = await response.json();
     } catch {}
     if (seq !== this.seq) return; // a newer card (or a clear) happened meanwhile
@@ -85,13 +84,13 @@ export class MarketOverlay {
       m.heat ? `Heat ${m.heat.score}${m.heat.beta ? ' β' : ''}` : null,
       m.priceSource ? esc(m.priceSource) : null,
     ].filter(Boolean).join(' · ');
-    const price = m.loadingMarket ? '<span class="sheet-amount is-loading">&nbsp;</span>' : `<span class="sheet-amount${m.price ? '' : ' is-missing'}">${m.price ? esc(m.price) : 'Prix n.d.'}</span>`;
+    const price = m.loadingMarket ? '<span class="sheet-amount is-loading">&nbsp;</span>' : `<span class="sheet-amount${m.price ? '' : ' is-missing'}">${m.price ? esc(m.price) : esc(t('Prix n.d.'))}</span>`;
     this.root.innerHTML = `
       <div class="sheet lite" role="group" aria-label="${esc(m.name)}">
         <span class="sheet-grab" aria-hidden="true"></span>
-        <button class="sheet-x" type="button" aria-label="Masquer le résultat">×</button>
-        <button class="sheet-add" type="button" aria-label="Ajouter ${esc(m.name)} à la collection">＋</button>
-        <button class="sheet-main" type="button" aria-label="Ouvrir la fiche de ${esc(m.name)}">
+        <button class="sheet-x" type="button" aria-label="${esc(t('Masquer le résultat'))}">×</button>
+        <button class="sheet-add" type="button" aria-label="${esc(t('Ajouter {name} à la collection', { name: m.name }))}">＋</button>
+        <button class="sheet-main" type="button" aria-label="${esc(t('Ouvrir la fiche de {name}', { name: m.name }))}">
           <span class="sheet-row"><span class="sheet-name">${esc(m.name)}</span>${price}</span>
           <span class="sheet-meta">${meta}</span>
           ${signals ? `<span class="sheet-signal">${signals}</span>` : ''}

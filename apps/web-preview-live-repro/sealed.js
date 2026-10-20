@@ -4,14 +4,19 @@
 (() => {
   const $ = s => document.querySelector(s);
   const esc = t => String(t ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
-  const fmt = (v, c = 'EUR') => (v == null ? null : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c, maximumFractionDigits: v >= 100 ? 0 : 2 }).format(v));
+  const fmt = (v, c = 'EUR') => (v == null ? null : new Intl.NumberFormat(globalThis.I18N?.locale() || 'fr-FR', { style: 'currency', currency: c, maximumFractionDigits: v >= 100 ? 0 : 2 }).format(v));
   const LANG = { en: 'Anglais', fr: 'Français', ja: 'Japonais', de: 'Allemand', es: 'Espagnol', it: 'Italien' };
   const registry = () => store.get('barcodeRegistry', {});
+  const T = (x, v) => (globalThis.I18N ? globalThis.I18N.t(x, v) : x);
+  const langName = l => T(LANG[l] || l);
 
   function thumb(p, cls = 'sealed-thumb') {
  return p.image ? `<img class="${cls}" src="${esc(p.image)}" alt="" decoding="async" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'${cls} is-empty',textContent:'▣'}))">` : `<span class="${cls} is-empty" aria-hidden="true">▣</span>`;
   }
+  // v0.4.0: English → TCGplayer (USD) shown first when both markets price the product.
+  const adapt = p => (p && globalThis.I18N?.market() === 'us' && p.altPrice?.currency === 'USD' && p.price?.currency === 'EUR' ? { ...p, price: { ...p.altPrice, low: null }, altPrice: p.price } : p);
   function priceLine(p) {
+    p = adapt(p);
     const main = p.price ? `${fmt(p.price.center, p.price.currency)} <small>${esc(p.price.source)}</small>` : 'Prix non disponible';
     const alt = p.altPrice ? ` · ${fmt(p.altPrice.center, p.altPrice.currency)} <small>${esc(p.altPrice.source)}</small>` : '';
     return main + alt;
@@ -22,11 +27,11 @@
     const r = await fetch(`/api/sealed?q=${encodeURIComponent(q)}`);
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Catalogue des produits scellés indisponible');
-    const items = j.items || [];
+    const items = (j.items || []).map(adapt);
     const meta = $('#searchMeta');
     if (!items.length) { $('#results').innerHTML = '<div class="collection-empty">Aucun produit scellé trouvé. Essayez « coffret dresseur », « display », « booster » ou le nom de l’extension.</div>'; if (meta) meta.textContent = ''; return; }
     if (meta) meta.textContent = `${j.count} produit${j.count > 1 ? 's' : ''} · prix Cardmarket et TCGplayer.`;
-    $('#results').innerHTML = items.map((p, i) => `<button class="result" data-i="${i}">${thumb(p)}<span><b>${esc(p.name)}</b><small>${esc(p.typeLabel)}${p.lang ? ` · ${esc(LANG[p.lang] || p.lang)}` : ''}${p.price ? ` · ${fmt(p.price.center, p.price.currency)}` : ''}</small></span><span>›</span></button>`).join('');
+    $('#results').innerHTML = items.map((p, i) => `<button class="result" data-i="${i}">${thumb(p)}<span><b>${esc(p.name)}</b><small>${esc(T(p.typeLabel))}${p.lang ? ` · ${esc(langName(p.lang))}` : ''}${p.price ? ` · ${fmt(p.price.center, p.price.currency)}` : ''}</small></span><span>›</span></button>`).join('');
     document.querySelectorAll('#results [data-i]').forEach(b => { b.onclick = () => window.openSealed(items[Number(b.dataset.i)]); });
   };
 
@@ -36,6 +41,7 @@
     if (!p.typeLabel && p.id) { // legacy entries (collection / registry) carry only an id
       try { const r = await fetch(`/api/sealed?id=${encodeURIComponent(p.id)}`); if (r.ok) p = { ...p, ...(await r.json()) }; } catch {}
     }
+    p = adapt(p);
     state.lastScreen = state.screen === 'detail' ? state.lastScreen : state.screen;
     state.current = { kind: 'sealed', ...p };
     window.go('detail');
@@ -54,7 +60,7 @@
     const codes = Object.entries(registry()).filter(([, v]) => v.id === p.id).map(([k]) => k);
     const pending = state.pendingBarcode;
     $('#detailContent').innerHTML = `
-      <p class="eyebrow">${esc(p.typeLabel || 'Produit scellé')}${p.lang ? ` · ${esc(LANG[p.lang] || p.lang)}` : ''}${p.releaseDate ? ` · ${new Date(p.releaseDate).getFullYear()}` : ''}</p>
+      <p class="eyebrow">${esc(T(p.typeLabel || 'Produit scellé'))}${p.lang ? ` · ${esc(langName(p.lang))}` : ''}${p.releaseDate ? ` · ${new Date(p.releaseDate).getFullYear()}` : ''}</p>
       <h2>${esc(p.name)}</h2>
       <div class="price-line"><strong>${p.price ? fmt(p.price.center, p.price.currency) : '—'}</strong><span class="muted tiny">${p.price ? `tendance ${esc(p.price.source)}` : 'Prix non disponible'}</span></div>
       <div class="section-title">Marché</div>
@@ -112,10 +118,10 @@
       <button class="sealed-main" type="button" data-open>
         ${thumb(p, 'sealed-sheet-img')}
         <span class="sealed-body">
-          <span class="sheet-set">${esc(p.typeLabel)}${p.lang ? ` · ${esc(LANG[p.lang] || p.lang)}` : ''}</span>
+          <span class="sheet-set">${esc(T(p.typeLabel))}${p.lang ? ` · ${esc(langName(p.lang))}` : ''}</span>
           <span class="sheet-name">${esc(p.name)}</span>
           <span class="sealed-price">${priceLine(p)}</span>
-          <span class="sealed-code">${verified ? 'Code-barres reconnu' : 'Code-barres lu'} · ${esc(code)}</span>
+          <span class="sealed-code">${esc(T(verified ? 'Code-barres reconnu' : 'Code-barres lu'))} · ${esc(code)}</span>
         </span>
       </button>
       ${verified ? '' : `<div class="sealed-actions"><button class="primary" type="button" data-confirm>C’est bien ce produit</button>${others.length ? '<button class="secondary" type="button" data-others>Autre produit</button>' : ''}</div>`}
@@ -131,7 +137,7 @@
       const p = { ...local, id: local.id };
       show(productCard(p, code, { status: 'USER' }), code);
       overlay.querySelector('[data-open]').onclick = () => window.openSealed(p);
-      navigator.vibrate?.(12);
+      if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(12);
       return;
     }
     show(`<div class="sheet sealed-sheet is-loading"><span class="sheet-foil" aria-hidden="true"></span><span class="sealed-code">Code-barres ${esc(code)} · recherche du produit…</span></div>`, code);
@@ -142,7 +148,7 @@
     if (j?.status === 'VERIFIED' && j.product) {
       show(productCard(j.product, code, { status: 'VERIFIED' }), code);
       overlay.querySelector('[data-open]').onclick = () => window.openSealed(j.product);
-      navigator.vibrate?.(12);
+      if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(12);
       return;
     }
     if (cands.length) {
@@ -167,7 +173,7 @@
   }
 
   function chooseAmong(code, cands, title) {
-    window.modal('Quel produit ?', `${title ? `<p class="muted tiny">Base publique : « ${esc(title)} »</p>` : ''}<div class="results">${cands.map((p, i) => `<button class="result" data-c="${i}">${thumb(p)}<span><b>${esc(p.name)}</b><small>${esc(p.typeLabel)}${p.price ? ` · ${fmt(p.price.center, p.price.currency)}` : ''}</small></span><span>›</span></button>`).join('')}</div>`, 'Code-barres');
+    window.modal('Quel produit ?', `${title ? `<p class="muted tiny">${esc(T('Base publique'))} : « ${esc(title)} »</p>` : ''}<div class="results">${cands.map((p, i) => `<button class="result" data-c="${i}">${thumb(p)}<span><b>${esc(p.name)}</b><small>${esc(T(p.typeLabel))}${p.price ? ` · ${fmt(p.price.center, p.price.currency)}` : ''}</small></span><span>›</span></button>`).join('')}</div>`, 'Code-barres');
     document.querySelectorAll('#modalBody [data-c]').forEach(b => { b.onclick = () => { const p = cands[Number(b.dataset.c)]; bind(code, p); window.closeModal(); show(productCard(p, code, { status: 'USER' }), code); overlay.querySelector('[data-open]').onclick = () => window.openSealed(p); }; });
   }
 

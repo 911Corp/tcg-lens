@@ -79,4 +79,24 @@
   // Open straight on the live scanner. Browsers that need a gesture get a "Réessayer" in the HUD.
   const boot = () => { if (!window.TCGLiveLens) return setTimeout(boot, 50); window.TCGLiveLens.preload?.(); window.startCamera?.(); };
   if (document.readyState === 'complete') boot(); else window.addEventListener('load', boot, { once: true });
+
+  // v0.4.0 — background / foreground. Hidden: analysis pauses (battery, heat). Back: the camera is restarted
+  // when the OS stopped it (iOS ends the track when the app leaves the screen), otherwise analysis resumes.
+  const cameraAlive = () => { const tr = state.stream?.getVideoTracks?.()[0]; return Boolean(tr && tr.readyState === 'live' && !tr.muted); };
+  const onLens = () => state.screen === 'lens';
+  let hiddenAt = 0;
+  const comeBack = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!cameraAlive()) { window.startCamera?.(); return; }
+    const v = document.querySelector('#camera'); if (v?.paused) v.play?.().catch(() => {});
+    if (onLens()) window.TCGLiveLens?.resume?.();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); window.TCGLiveLens?.pause?.(); return; }
+    comeBack();
+  });
+  window.addEventListener('pageshow', e => { if (e.persisted) comeBack(); });
+  // A track ended while visible (camera taken by another app, device change): restart once it is visible again.
+  const watch = () => { const tr = state.stream?.getVideoTracks?.()[0]; if (tr && !tr.__watched) { tr.__watched = true; tr.addEventListener('ended', () => { if (document.visibilityState === 'visible') setTimeout(comeBack, 300); }); } };
+  setInterval(watch, 1000);
 })();

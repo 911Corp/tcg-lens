@@ -27,6 +27,9 @@ test('CSV export (semicolons, French decimals) and migration of old items', () =
   const csv = toCSV(list);
   assert.match(csv, /^﻿Nom;Type;Extension/);
   assert.match(csv, /Radiant Charizard;Carte;Pokémon GO;011\/078;EN;2;18,5;EUR;37;/);
+  const en = toCSV(list, { lang: 'en' });
+  assert.match(en, /^\ufeffName,Type,Set,Number/);
+  assert.match(en, /Radiant Charizard,Card,Pokémon GO,011\/078,EN,2,18.5,EUR,37,/);
   const old = migrate([{ key: 'card:abc', kind: 'card', id: 'abc', lang: 'fr', name: 'Old', expansion: 'Base', localId: '4', market: null }]);
   assert.equal(old[0].key, 'card:abc:fr'); assert.equal(old[0].setName, 'Base'); assert.equal(old[0].qty, 1);
 });

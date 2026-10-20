@@ -262,3 +262,27 @@ endroit ; les jumelles d'illustration ne sont écartées que par la preuve visue
 (`twinFreeByScript`, même règle que `_resolveTwins`). Sinon « ? — à scanner seule » (pas d'OCR dans ce mode, langue
 jamais affirmée). Barre de total et « Tout ajouter ». Sur la scène de test à 4 cartes : 2 nommées, 2 « ? » (jumelles
 japonaises trop proches visuellement, écart 0,036–0,048 < 0,07), aucune erreur.
+
+## v0.4.0 — Français / English, stabilité
+
+**Langue de l'application** (`/i18n.js`, chargé avant tout autre script ; `lens/i18nRef.js` pour les modules).
+- Réglages → première ligne « Langue de l’application » : Français | English (chaque option écrite dans sa langue).
+  Premier lancement : langue du téléphone (français si le téléphone est en français, anglais sinon). Changement à
+  chaud, sans recharger ni couper la caméra (`tcglens:uilang`).
+- Adaptation, pas traduction mot à mot : vocabulaire des collectionneurs anglophones (Set, Market, Elite Trainer Box,
+  Booster Box…), prix TCGplayer en USD en premier (Cardmarket EUR en repli ; le momentum Cardmarket alimente toujours
+  le Heat), formats en-US, nom et extension anglais tant que la langue imprimée n’est pas prouvée, CSV à virgules et
+  points décimaux, recherche du catalogue en anglais par défaut. En français : Cardmarket EUR d’abord, formats fr-FR.
+- Mécanique : clés = textes français ; les vues compactes (`app-*.js`) et l’HTML statique sont traduits au rendu par
+  un MutationObserver (correspondance exacte + motifs pour les textes avec nombres) ; les modules utilisent `t()` avec
+  variables. `translate="no"` exclut un élément. Test : toute clé `t('…')` doit exister en anglais.
+- API : `/api/card?…&market=us|eu` choisit le marché affiché.
+
+**Stabilité**
+- Endurance 3 min (carte FR → table vide → carte JA en boucle) : mémoire stable (156–166 Mo), ~5 analyses/s, 12/12
+  identifications correctes, aucune erreur ; idem 2 min en anglais.
+- Arrière-plan : analyse en pause quand l’app est masquée ; au retour, la caméra est relancée si le système l’a coupée
+  (iOS), sinon l’analyse reprend. Piste vidéo terminée pendant l’usage → relance.
+- Worker d’image en panne → le scan continue dans la page, nouveau worker 10 s plus tard (3 fois au plus par session).
+- Vibration seulement après un premier geste de l’utilisateur.
+- Nom affiché quand la langue n’est pas prouvée : celui de la langue de l’application (plus celle du téléphone).

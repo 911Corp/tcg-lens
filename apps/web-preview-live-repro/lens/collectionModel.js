@@ -58,18 +58,23 @@ export const SORTS = Object.freeze({
 export function sorted(list, by = 'recent') { return [...normalize(list)].sort(SORTS[by] || SORTS.recent); }
 
 const LANG = { fr: 'FR', en: 'EN', ja: 'JA' };
-const csvCell = v => { const s = v == null ? '' : String(v); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-/** CSV (semicolon-separated, opens directly in a French spreadsheet). */
-export function toCSV(list) {
-  const head = ['Nom', 'Type', 'Extension', 'Numéro', 'Langue', 'Quantité', 'Prix unitaire', 'Devise', 'Valeur', 'Source du prix', 'Prix du', 'Ajouté le', 'Identifiant'];
+const csvCell = (v, sep) => { const s = v == null ? '' : String(v); return s.includes(sep) || /["\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+/**
+ * CSV in the app language: French → semicolons and decimal commas (French spreadsheets); English → commas and
+ * decimal points, English headers.
+ */
+export function toCSV(list, { lang = 'fr' } = {}) {
+  const en = lang === 'en', sep = en ? ',' : ';', dec = v => (en ? String(v) : String(v).replace('.', ','));
+  const head = en ? ['Name', 'Type', 'Set', 'Number', 'Language', 'Quantity', 'Unit price', 'Currency', 'Value', 'Price source', 'Price date', 'Added', 'ID']
+    : ['Nom', 'Type', 'Extension', 'Numéro', 'Langue', 'Quantité', 'Prix unitaire', 'Devise', 'Valeur', 'Source du prix', 'Prix du', 'Ajouté le', 'Identifiant'];
   const rows = normalize(list).map(x => {
     const p = x.market?.center ?? null;
-    return [x.name, x.kind === 'sealed' ? 'Produit scellé' : 'Carte', x.setName, x.number,
+    return [x.name, x.kind === 'sealed' ? (en ? 'Sealed product' : 'Produit scellé') : (en ? 'Card' : 'Carte'), x.setName, x.number,
       x.lang ? LANG[x.lang] || x.lang : x.languageCandidates?.length ? `${x.languageCandidates.map(l => LANG[l] || l).join('/')} ?` : '',
-      x.qty, p != null ? String(p).replace('.', ',') : '', p != null ? x.market.currency : '', p != null ? String(Math.round(p * x.qty * 100) / 100).replace('.', ',') : '',
+      x.qty, p != null ? dec(p) : '', p != null ? x.market.currency : '', p != null ? dec(Math.round(p * x.qty * 100) / 100) : '',
       x.market?.source || '', x.priceAt ? new Date(x.priceAt).toISOString().slice(0, 10) : '', x.addedAt ? new Date(x.addedAt).toISOString().slice(0, 10) : '', x.id];
   });
-  return '﻿' + [head, ...rows].map(r => r.map(csvCell).join(';')).join('\r\n');
+  return '﻿' + [head, ...rows].map(r => r.map(v => csvCell(v, sep)).join(sep)).join('\r\n');
 }
 
 /** Old v0.3.x items ({ key: 'card:<id>', expansion, localId, market }) → current shape. */

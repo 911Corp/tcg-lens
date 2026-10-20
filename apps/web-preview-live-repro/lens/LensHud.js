@@ -9,7 +9,11 @@
  * Presentation only: nothing here influences identity decisions.
  */
 
-export const LANG_NAMES = Object.freeze({ fr: 'français', en: 'anglais', ja: 'japonais', auto: 'toutes langues' });
+import { t, locale } from './i18nRef.js';
+
+const LANG_FR = Object.freeze({ fr: 'français', en: 'anglais', ja: 'japonais', auto: 'toutes langues' });
+/** Language names in the app language. */
+export const LANG_NAMES = new Proxy(LANG_FR, { get: (o, k) => (k in o ? t(o[k]) : undefined) });
 export const TONES = Object.freeze(['idle', 'work', 'attention', 'fail', 'locked']);
 
 const clamp01 = v => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
@@ -36,11 +40,11 @@ export function qualityProblem({ quality = null, geometryReason = null } = {}) {
 function indexHint({ indexCount = 0, indexTarget = 0, lang = 'fr', indexDownload = null }) {
   if (indexDownload && indexDownload.done < indexDownload.total) {
     const p = clamp01((indexDownload.done + 0.35) / indexDownload.total);
-    return { text: `Téléchargement du catalogue visuel (${Math.round(p * 100)} %)`, progress: p };
+    return { text: t('Téléchargement du catalogue visuel ({p} %)', { p: Math.round(p * 100) }), progress: p };
   }
   if (!indexTarget || indexCount >= indexTarget) return null;
-  const fmt = n => new Intl.NumberFormat('fr-FR').format(n);
-  return { text: `Préparation des cartes de référence (${LANG_NAMES[lang] || lang}) : ${fmt(indexCount)} sur ${fmt(indexTarget)}`, progress: clamp01(indexCount / indexTarget) };
+  const fmt = n => new Intl.NumberFormat(locale()).format(n);
+  return { text: t('Préparation des cartes de référence ({lang}) : {n} sur {total}', { lang: LANG_NAMES[lang] || lang, n: fmt(indexCount), total: fmt(indexTarget) }), progress: clamp01(indexCount / indexTarget) };
 }
 
 function ambiguousHint(reason = '', lang = 'fr', idx = null) {
@@ -54,14 +58,14 @@ function ambiguousHint(reason = '', lang = 'fr', idx = null) {
   if (reason === 'artwork_twins') return 'Cette illustration existe dans plusieurs éditions : lecture du texte imprimé.';
   if (reason.startsWith('language_contradiction')) {
     const l = reason.split(':')[1];
-    return `La carte semble être en ${LANG_NAMES[l] || l}, mais cette édition n’existe pas dans cette langue au catalogue. TCG Lens préfère ne pas trancher.`;
+    return t('La carte semble être en {lang}, mais cette édition n’existe pas dans cette langue au catalogue. TCG Lens préfère ne pas trancher.', { lang: LANG_NAMES[l] || l });
   }
   if (reason.includes('contradiction') || reason.includes('collector_identifier_conflict')) {
     if (lang === 'auto') return 'Le numéro lu ne correspond pas à l’image. Rendez le bas de la carte bien lisible.';
-    return `Le numéro lu ne correspond pas à l’image. Vérifiez que la carte est bien en ${LANG_NAMES[lang] || lang}.`;
+    return t('Le numéro lu ne correspond pas à l’image. Vérifiez que la carte est bien en {lang}.', { lang: LANG_NAMES[lang] || lang });
   }
   // While references are still loading, the true card may simply not be comparable yet.
-  if (idx) return `Cette carte n’est peut-être pas encore chargée. ${idx.text}.`;
+  if (idx) return t('Cette carte n’est peut-être pas encore chargée. {text}.', { text: idx.text });
   if (reason.includes('margin')) return 'Plusieurs cartes se ressemblent. Approchez-vous pour rendre le numéro lisible.';
   return 'Approchez-vous pour rendre le numéro en bas de la carte lisible.';
 }
@@ -104,9 +108,9 @@ export function describeHud(input = {}) {
   const kind = decision?.decision;
 
   if (state === 'UNKNOWN') {
-    if (idx) return { tone: 'attention', key: 'unknown-index', title: 'Cartes de référence en préparation', hint: `${idx.text}. La reconnaissance s’améliore à mesure.`, progress: idx.progress };
+    if (idx) return { tone: 'attention', key: 'unknown-index', title: 'Cartes de référence en préparation', hint: t('{text}. La reconnaissance s’améliore à mesure.', { text: idx.text }), progress: idx.progress };
     if (problem) return { tone: 'attention', key: `q-${problem.title}`, ...problem, progress: null };
-    return { tone: 'fail', key: 'unknown', title: 'Carte non reconnue', hint: lang === 'auto' ? 'Cette carte n’est pas encore au catalogue, ou l’image est trop différente. Essayez sous un autre angle.' : `Vérifiez que la langue de scan correspond à la carte (${LANG_NAMES[lang] || lang}).`, progress: null };
+    return { tone: 'fail', key: 'unknown', title: 'Carte non reconnue', hint: lang === 'auto' ? 'Cette carte n’est pas encore au catalogue, ou l’image est trop différente. Essayez sous un autre angle.' : t('Vérifiez que la langue de scan correspond à la carte ({lang}).', { lang: LANG_NAMES[lang] || lang }), progress: null };
   }
 
   if (state === 'AMBIGUOUS' || kind === 'AMBIGUOUS') {

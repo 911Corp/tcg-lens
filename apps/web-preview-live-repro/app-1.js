@@ -7,7 +7,7 @@ function toast(t){const x=$('#toast');x.textContent=t;x.classList.add('show');se
 // v0.3.2: the camera is the permanent base layer; every other screen is a sheet over it.
 function go(id){if(id==='home')id='lens';const panel=id!=='lens';$$('.screen.panel').forEach(s=>{const on=s.id===id;s.classList.toggle('on',on);s.setAttribute('aria-hidden',String(!on));if(on)s.scrollTop=0});$('#lens').classList.add('on');document.body.classList.toggle('panel-open',panel);state.screen=id;if(id==='collection')renderCollection();if(id==='settings')renderSettings();if(state.stream){if(id==='lens')window.TCGLiveLens?.resume?.();else window.TCGLiveLens?.pause?.();}}
 $$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
-function money(v,c='EUR'){if(v==null||!Number.isFinite(Number(v)))return'—';try{return new Intl.NumberFormat('fr-FR',{style:'currency',currency:c,maximumFractionDigits:Number(v)>=100?0:2}).format(Number(v))}catch{return `${Number(v).toFixed(2)} ${c}`}}
+function money(v,c='EUR'){if(v==null||!Number.isFinite(Number(v)))return'—';try{return new Intl.NumberFormat(globalThis.I18N?.locale()||'fr-FR',{style:'currency',currency:c,maximumFractionDigits:Number(v)>=100?0:2}).format(Number(v))}catch{return `${Number(v).toFixed(2)} ${c}`}}
 function imageUrl(base,q='low'){if(!base)return null;if(/\.(webp|png|jpg)$/i.test(base))return base;return `${base}/${q}.webp`}
 function safe(t){return String(t??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 const HEAT_FR={COLD:'Froid',COOL:'Frais',WARM:'Tiède',HOT:'Chaud',SURGING:'En flambée'};

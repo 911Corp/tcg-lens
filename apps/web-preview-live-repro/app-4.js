@@ -5,6 +5,6 @@ const legacyBarcodeBtn=$('#barcodeBtn');if(legacyBarcodeBtn)legacyBarcodeBtn.onc
 let deferredPrompt=null;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;const b=document.querySelector('#settingsInstall');if(b)b.hidden=false});async function installPWA(){if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null}else toast(/iphone|ipad|ipod/i.test(navigator.userAgent)?'Partager → Sur l’écran d’accueil':'Installation disponible depuis le menu du navigateur')}$('#settingsInstall').onclick=installPWA;
 if(/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.navigator.standalone)(document.querySelector('#iosInstall')||{}).textContent='Astuce iPhone : Partager → Sur l’écran d’accueil pour une expérience plein écran.';
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
-function tick(){const clock=$('#clock');if(clock)clock.textContent=new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}tick();setInterval(tick,30000);
+function tick(){const clock=$('#clock');if(clock)clock.textContent=new Date().toLocaleTimeString(globalThis.I18N?.locale()||'fr-FR',{hour:'2-digit',minute:'2-digit'})}tick();setInterval(tick,30000);
 const initLang=store.get('lang','fr');$('#langSelect').value=initLang;
 window.go=go;window.closeModal=closeModal;

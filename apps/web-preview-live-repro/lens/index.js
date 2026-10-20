@@ -16,6 +16,8 @@ function ensureRuntime() {
     debugNode: debug,
     multiLayer: $('#multiLayer'),
   });
+  // v0.4.0: app language changed → HUD and the shown result follow (market and wording).
+  document.addEventListener('tcglens:uilang', () => runtime.onUiLanguage?.());
   // v0.3.9: multi-card mode toggle (remembered on this device).
   const btn = $('#multiToggle');
   const apply = on => { const ok = runtime.setMultiMode(on); btn?.setAttribute('aria-pressed', String(ok && on)); if (on && !ok) window.toast?.('Mode plusieurs cartes indisponible sur cet appareil'); return ok && on; };

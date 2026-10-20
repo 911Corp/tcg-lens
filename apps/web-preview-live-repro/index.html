@@ -92,6 +92,8 @@
     <div class="content-shell">
       <header class="topbar"><h2>Réglages</h2><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-close"/></svg></button></header>
       <div class="settings-list">
+        <div class="setting"><label id="uiLangLabel">Langue de l’application</label><p>Textes, formats de prix et source de prix privilégiée (Cardmarket en euros ou TCGplayer en dollars).</p>
+          <div class="lang-seg" role="radiogroup" aria-labelledby="uiLangLabel" translate="no"><button type="button" role="radio" data-uilang="fr" lang="fr">Français</button><button type="button" role="radio" data-uilang="en" lang="en">English</button></div></div>
         <div class="setting"><label for="scanLang">Langue des cartes</label><p>En automatique, le Lens compare la carte au catalogue français, anglais et japonais, puis lit le texte imprimé pour confirmer la langue. Il n’affiche jamais une langue qu’il n’a pas vérifiée.</p><select id="scanLang"><option value="auto">Automatique (recommandé)</option><option value="fr">Français uniquement</option><option value="en">Anglais uniquement</option><option value="ja">Japonais uniquement</option></select></div>
         <div class="setting"><label>Caméra</label><p>Si l’image reste noire, relancez la caméra arrière.</p><button class="secondary full" id="restartCamera">Relancer la caméra</button></div>
         <div class="setting"><label>Fiabilité</label><p>Le Lens ne valide une carte qu’après plusieurs images concordantes et, si besoin, la lecture du numéro imprimé. Sinon il reste en « Identification incertaine » plutôt que de proposer une carte au hasard.</p></div>
@@ -130,6 +132,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite">OK</div>
   <canvas id="capture" hidden></canvas>
 </main>
+<script src="/i18n.js"></script>
 <script src="/app-1.js"></script><script src="/app-2.js"></script><script src="/app-3.js"></script><script src="/app-4.js"></script>
 <script src="/sealed.js"></script>
 <script src="/app-shell.js"></script>

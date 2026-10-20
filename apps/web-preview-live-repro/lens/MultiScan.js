@@ -10,6 +10,8 @@
  * printing exists in a single language. No OCR, no guessing.
  */
 
+import { t, money as fmtMoney, uiLang } from './i18nRef.js';
+
 /** Pure decision for one slot (testable). */
 export function multiDecision(history, policy) {
   const need = Math.max(2, policy.instantVotes ?? 2);
@@ -111,13 +113,13 @@ export class MultiScan {
     }
   }
 
-  priceKey(card) { return `${card.id}|${(card.languages || [card.lang]).join(',')}`; }
+  priceKey(card) { return `${card.id}|${(card.languages || [card.lang]).join(',')}|${uiLang()}`; }
 
   async _loadPrice(card) {
     const key = this.priceKey(card); this.prices.set(key, null);
     const langs = card.languages || [card.lang];
     try {
-      const r = await fetch(`/api/card?id=${encodeURIComponent(card.id)}&lang=${encodeURIComponent(langs[0] || 'fr')}${langs.length > 1 ? `&langs=${encodeURIComponent(langs.join(','))}` : ''}`);
+      const r = await fetch(`/api/card?id=${encodeURIComponent(card.id)}&lang=${encodeURIComponent(langs[0] || 'fr')}${langs.length > 1 ? `&langs=${encodeURIComponent(langs.join(','))}` : ''}&market=${uiLang() === 'en' ? 'us' : 'eu'}`);
       if (r.ok) { const c = await r.json(); this.prices.set(key, c.market?.center != null ? c.market : false); }
       else this.prices.set(key, false);
     } catch { this.prices.set(key, false); }
@@ -130,7 +132,7 @@ export class MultiScan {
     const L = this.layer; if (!L) return;
     if (!this.rt.multiMode) { L.hidden = true; L.innerHTML = ''; return; }
     L.hidden = false;
-    const fmt = (v, c) => { try { return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c || 'EUR', maximumFractionDigits: v >= 100 ? 0 : 2 }).format(v); } catch { return `${v} ${c}`; } };
+    const fmt = (v, c) => fmtMoney(v, c || 'EUR');
     const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
     const labels = this.slots.map(s => {
       const pts = s.quad.map(p => this.rt._screenPoint(p));
@@ -139,8 +141,8 @@ export class MultiScan {
       const st = s.decision.state, card = s.card;
       const m = card ? this.prices.get(this.priceKey(card)) : null;
       const text = st === 'identified' && card
-        ? `<b>${esc(card.name)}</b><small>${esc(card.setName || card.setId || '')} · ${esc(card.localId)}${m ? ` · ${esc((m.from ? 'dès ' : '') + fmt(m.center, m.currency))}` : ''}</small>`
-        : st === 'pending' ? '<b>…</b>' : '<b>?</b><small>À scanner seule</small>';
+        ? `<b>${esc(card.name)}</b><small>${esc(card.setName || card.setId || '')} · ${esc(card.localId)}${m ? ` · ${esc(m.from ? t('dès {price}', { price: fmt(m.center, m.currency) }) : fmt(m.center, m.currency))}` : ''}</small>`
+        : st === 'pending' ? '<b>…</b>' : `<b>?</b><small>${esc(t('À scanner seule'))}</small>`;
       // Inside the top of the card (never over the header, never outside the screen).
       return { poly, html: `<div class="mc-label is-${st}" style="left:${cx.toFixed(0)}px;top:${Math.max(64, top + Math.min(18, hgt * 0.06)).toFixed(0)}px">${text}</div>`, st };
     });
@@ -149,7 +151,7 @@ export class MultiScan {
     for (const s of ids) { const m = this.prices.get(this.priceKey(s.card)); if (m) totals[m.currency] = (totals[m.currency] || 0) + m.center; }
     const value = Object.entries(totals).map(([c, v]) => fmt(Math.round(v * 100) / 100, c)).join(' + ');
     L.innerHTML = `<svg class="mc-svg" aria-hidden="true">${labels.map(l => `<polygon class="mc-edge is-${l.st}" points="${l.poly}"/>`).join('')}</svg>${labels.map(l => l.html).join('')}
-      <div class="mc-bar"><span><b>${ids.length}</b> / ${this.slots.length} carte${this.slots.length > 1 ? 's' : ''} identifiée${ids.length > 1 ? 's' : ''}${value ? ` · ${esc(value)}` : ''}</span>${ids.length ? '<button type="button" class="mc-add">Tout ajouter</button>' : ''}</div>`;
+      <div class="mc-bar"><span>${uiLang() === 'en' ? `<b>${ids.length}</b> of ${this.slots.length} card${this.slots.length === 1 ? '' : 's'} identified` : `<b>${ids.length}</b> / ${this.slots.length} carte${this.slots.length > 1 ? 's' : ''} identifiée${ids.length > 1 ? 's' : ''}`}${value ? ` · ${esc(value)}` : ''}</span>${ids.length ? `<button type="button" class="mc-add">${esc(t('Tout ajouter'))}</button>` : ''}</div>`;
     L.querySelector('.mc-add')?.addEventListener('click', () => {
       for (const s of ids) {
         const c = s.card, m = this.prices.get(this.priceKey(c)) || null, langs = c.languages || [c.lang];
