@@ -184,7 +184,7 @@ export class LensRuntime {
       const top = candidates[0], second = candidates[1];
       const margin = top.score - (second?.score ?? 0);
       const previousVisualCandidateId = c.visualEvidence?.candidateId || null;
-      c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, visualOnlyLockAllowed: top.visualOnlyLockAllowed === true, quality: frame.quality.score };
+      c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, visualOnlyLockAllowed: top.visualOnlyLockAllowed === true, lockBlockedReason: top.lockBlockedReason || null, quality: frame.quality.score };
       const temporal = c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
       if (c.ocrEpoch !== temporal.epoch) {
         this._resetOcrEvidence(c, { reason: 'temporal_epoch_changed', temporalEpoch: temporal.epoch });
@@ -225,6 +225,9 @@ export class LensRuntime {
     try {
       this.telemetry.emit('OCR_START', token);
       const evidence = await this.ocr.analyze(canvas, this.lang, c.visualCandidates);
+      // Targeted warming is global (index-level) and identity-neutral, so it runs even if this
+      // OCR result turns out to be stale for the current track.
+      if (evidence?.lookupItems?.length) this._warmTargeted(evidence.lookupItems);
       if (!this._isIdentityTokenCurrent(token)) {
         this.telemetry.emit('OCR_STALE_DISCARDED', {
           launchedFor: token,
@@ -411,6 +414,15 @@ export class LensRuntime {
 
   _isIdentityTokenCurrent(token) {
     return isIdentityTokenCurrent({ running: this.running, context: this.context, track: this.tracker.track }, token);
+  }
+
+  _warmTargeted(items) {
+    if (this.targetedWarmInFlight) return;
+    this.targetedWarmInFlight = true;
+    this.index.warmTargeted(items, this.lang, this.embedding)
+      .then(added => { if (added.length) this.telemetry.emit('INDEX_TARGETED_WARM', { added: added.length, ids: added.slice(0, 6) }); })
+      .catch(error => this.telemetry.emit('INDEX_TARGETED_WARM_ERROR', { message: error?.message || String(error) }))
+      .finally(() => { this.targetedWarmInFlight = false; });
   }
 
   _warmIndex() {

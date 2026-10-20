@@ -27,6 +27,11 @@ const scenarios = [
     requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-b', 'test-a'] },
   },
   {
+    id: 'unindexed-artwork-twin-never-locks-even-with-ocr',
+    run: () => runReplay({ visualOnlyLockAllowed: false, lockBlockedReason: 'UNINDEXED_ARTWORK_TWIN', ocrRead: ({ candidateId }) => ({ candidateId, collectorExact: true, strongNameMatch: true, contradiction: false }) }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
     id: 'printed-metadata-contradiction-blocks-extreme-visual',
     run: () => runReplay({ visualOnlyLockAllowed: true, ocrRead: () => ({ candidateId: null, contradiction: true }) }),
     requirements: { minSegmentCoverage: 0, lockSequence: [] },

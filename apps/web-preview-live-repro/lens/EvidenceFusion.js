@@ -43,6 +43,13 @@ export class EvidenceFusion {
       };
     }
 
+    // v0.3.1: the canonical pool can mark a candidate as never lockable, e.g. it has an artwork twin
+    // (reprint / classic collection) with no usable reference image. Neither visual consensus nor a
+    // printed number can tell them apart, so the honest outcome is AMBIGUOUS.
+    if (visual.lockBlockedReason) {
+      return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: `candidate_lock_blocked:${visual.lockBlockedReason}` };
+    }
+
     if (!marginOk && top.votes >= p.minTemporalVotes) {
       return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: 'top1_top2_margin_too_small' };
     }

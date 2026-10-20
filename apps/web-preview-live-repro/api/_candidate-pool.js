@@ -40,6 +40,7 @@ export function publicItem(item) {
     id: item.id, entityId: item.entityId, name: item.name, localId: item.localId, printedTotal: item.printedTotal,
     lang: item.lang, setId: item.setId, setName: item.setName, setAbbreviation: item.setAbbreviation,
     releaseDate: item.releaseDate, image: item.image, setReadiness: item.setReadiness, visualOnlyLockAllowed: item.visualOnlyLockAllowed === true,
+    lockBlockedReason: item.lockBlockedReason || null, artworkTwins: item.artworkTwins ?? 0,
   };
 }
 

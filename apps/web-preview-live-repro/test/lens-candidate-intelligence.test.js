@@ -170,3 +170,36 @@ test('replay: a printed-metadata contradiction beats extreme visual consensus', 
   const { events } = runReplay({ visualOnlyLockAllowed: true, ocrRead: () => ({ candidateId: null, contradiction: true }) });
   assert.equal(events.filter(e => e.type === 'LOCK').length, 0);
 });
+
+test('a candidate with an unindexed artwork twin never locks, even with printed-number consensus', () => {
+  const fusion = new EvidenceFusion();
+  const ocr = new OCRConsensus();
+  ocr.observe({ available: true, candidateId: 'base1-4', collectorExact: true, strongNameMatch: true }, 'base1-4');
+  const two = ocr.observe({ available: true, candidateId: 'base1-4', collectorExact: true, strongNameMatch: true }, 'base1-4');
+  const result = fusion.evaluate({
+    temporal: temporal('base1-4', 8, 0.99, 0.2, 0.8),
+    visual: { candidateId: 'base1-4', score: 0.99, margin: 0.2, embeddingVerified: true, visualOnlyLockAllowed: false, lockBlockedReason: 'UNINDEXED_ARTWORK_TWIN' },
+    ocr: two, canonical: { conflict: false }
+  });
+  assert.equal(result.decision, 'AMBIGUOUS');
+  assert.equal(result.reason, 'candidate_lock_blocked:UNINDEXED_ARTWORK_TWIN');
+  const { events } = runReplay({ lockBlockedReason: 'UNINDEXED_ARTWORK_TWIN', ocrRead: ({ candidateId }) => ({ candidateId, collectorExact: true, strongNameMatch: true }) });
+  assert.equal(events.filter(e => e.type === 'LOCK').length, 0);
+});
+
+import { ANNIndex } from '../lens/ANNIndex.js';
+
+test('targeted warming adds canonical refs with pool flags, bounded and language-scoped', async () => {
+  const index = new ANNIndex();
+  const embedding = { model: null, imageCanvas: async () => ({}), fastDescriptor: () => [1, 0, 0] };
+  const items = Array.from({ length: 20 }, (_, i) => ({ id: `old-${i}`, lang: 'en', name: 'Charizard', localId: '4', printedTotal: 102, image: `https://x/${i}/low.webp`, visualOnlyLockAllowed: i === 0, lockBlockedReason: i === 1 ? 'UNINDEXED_ARTWORK_TWIN' : null }));
+  items.push({ id: 'fr-1', lang: 'fr', name: 'Dracaufeu', localId: '4', image: 'https://x/fr/low.webp' });
+  const added = await index.warmTargeted(items, 'en', embedding);
+  assert.equal(added.length, 12, 'bounded');
+  assert.equal(index.count('en'), 12);
+  assert.equal(index.count('fr'), 0, 'language scoped');
+  assert.equal(index.refs.get('en:old-0').visualOnlyLockAllowed, true);
+  assert.equal(index.refs.get('en:old-1').lockBlockedReason, 'UNINDEXED_ARTWORK_TWIN');
+  assert.equal(index.refs.get('en:old-2').visualOnlyLockAllowed, false);
+  assert.deepEqual(await index.warmTargeted(items.slice(0, 3), 'en', embedding), [], 'idempotent');
+});

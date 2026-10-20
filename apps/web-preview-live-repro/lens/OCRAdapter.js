@@ -31,7 +31,8 @@ export class OCRAdapter {
     const topText = (topResult.data?.text || '').replace(/\s+/g, ' ').trim();
     const bottomText = (bottomResult.data?.text || '').replace(/\s+/g, ' ').trim();
     const parsed = this.parse(`${topText} ${bottomText}`, bottomText);
-    const candidates = await this.resolveCandidates(parsed, lang, visualCandidates);
+    const lookupItems = await this.lookupCanonical(parsed, lang);
+    const candidates = await this.resolveCandidates(parsed, lang, visualCandidates, lookupItems);
     const best = candidates[0] || null;
     return {
       available: true, text: `${topText} ${bottomText}`.trim(), parsed, candidates,
@@ -41,6 +42,8 @@ export class OCRAdapter {
       printingSupport: Boolean(best?.collectorExact),
       conceptSupport: Boolean(best?.nameScore >= 0.72),
       contradiction: Boolean(best?.contradiction),
+      // Canonical printings matching number + printed total; used for targeted index warming only.
+      lookupItems: parsed.printedTotal ? lookupItems : [],
     };
   }
 
@@ -52,14 +55,17 @@ export class OCRAdapter {
     return { collector: fallback.number || '', printedTotal: fallback.printedTotal, setCode: fallback.setCode, words, text };
   }
 
-  async resolveCandidates(parsed, lang, visualCandidates) {
+  async lookupCanonical(parsed, lang) {
     // Canonical-pool lookup (never live TCGdex): number + printed total narrows to real printings.
-    let pool = [];
-    if (parsed.collector) {
-      const params = new URLSearchParams({ lang, number: parsed.collector });
-      if (parsed.printedTotal) params.set('total', String(parsed.printedTotal));
-      try { const r = await fetch(`/api/candidate-lookup?${params}`); if (r.ok) pool = (await r.json()).items || []; } catch {}
-    }
+    if (!parsed.collector) return [];
+    const params = new URLSearchParams({ lang, number: parsed.collector });
+    if (parsed.printedTotal) params.set('total', String(parsed.printedTotal));
+    try { const r = await fetch(`/api/candidate-lookup?${params}`); if (r.ok) return (await r.json()).items || []; } catch {}
+    return [];
+  }
+
+  async resolveCandidates(parsed, lang, visualCandidates, lookupItems = undefined) {
+    const pool = lookupItems ?? await this.lookupCanonical(parsed, lang);
     // Visual top-K candidates carry their canonical metadata; always evaluate them directly.
     const byId = new Map();
     for (const card of [...visualCandidates, ...pool]) if (card?.id && !byId.has(card.id)) byId.set(card.id, card);

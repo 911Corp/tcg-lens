@@ -11,7 +11,7 @@ export class ANNIndex {
   }
 
   async open() {
-    if (this.db || !('indexedDB' in window)) return this.db;
+    if (this.db || typeof window === 'undefined' || !('indexedDB' in window)) return this.db;
     this.db = await new Promise(resolve => {
       const req = indexedDB.open('tcg-lens-ann-v3', 1);
       req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains('refs')) db.createObjectStore('refs', { keyPath: 'key' }); if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' }); };
@@ -85,23 +85,41 @@ export class ANNIndex {
       for (const card of items) {
         if (signal?.aborted) break;
         const key = `${lang}:${card.id}`; if (this.refs.has(key)) continue;
-        try {
-          const image = await embedding.imageCanvas(card.image);
-          const fast = Array.from(embedding.fastDescriptor(image));
-          let deep = null;
-          if (embedding.model) deep = Array.from(await embedding.embed(image));
-          await this.put({
-            key, id: card.id, entityId: card.entityId || null, name: card.name, localId: String(card.localId || ''), lang,
-            setId: card.setId || null, setName: card.setName || null, setAbbreviation: card.setAbbreviation || null,
-            printedTotal: card.printedTotal ?? null, setReadiness: card.setReadiness || null,
-            visualOnlyLockAllowed: card.visualOnlyLockAllowed === true, poolBuildId: payload.buildId || null,
-            image: card.image, fast, deep, at: Date.now(),
-          });
-        } catch {}
+        try { await this.put(await this._refFromCard(card, lang, embedding, payload.buildId)); } catch {}
       }
       if (payload.exhausted) cursor = '0'; else cursor = payload.nextCursor || cursor;
       this.cursor.set(lang, cursor); await this._metaSet(`cursor:${lang}`, cursor);
     } finally { this.warming = false; }
+  }
+
+  /**
+   * v0.3.1 targeted warming: add canonical-pool printings matching a printed number + printed total
+   * read by OCR, so the true card can be compared visually even when it is outside the bounded
+   * newest-first warm window. Adds candidates only; locking rules are unchanged.
+   */
+  async warmTargeted(items, lang, embedding, { limit = 12 } = {}) {
+    const added = [];
+    for (const card of (items || []).filter(x => x?.id && x.image && x.lang === lang).slice(0, limit)) {
+      const key = `${lang}:${card.id}`;
+      if (this.refs.has(key)) continue;
+      try { await this.put(await this._refFromCard(card, lang, embedding, card.poolBuildId || null)); added.push(card.id); } catch {}
+    }
+    return added;
+  }
+
+  async _refFromCard(card, lang, embedding, buildId) {
+    const image = await embedding.imageCanvas(card.image);
+    const fast = Array.from(embedding.fastDescriptor(image));
+    let deep = null;
+    if (embedding.model) deep = Array.from(await embedding.embed(image));
+    return {
+      key: `${lang}:${card.id}`, id: card.id, entityId: card.entityId || null, name: card.name, localId: String(card.localId || ''), lang,
+      setId: card.setId || null, setName: card.setName || null, setAbbreviation: card.setAbbreviation || null,
+      printedTotal: card.printedTotal ?? null, setReadiness: card.setReadiness || null,
+      visualOnlyLockAllowed: card.visualOnlyLockAllowed === true, lockBlockedReason: card.lockBlockedReason || null,
+      artworkTwins: card.artworkTwins ?? 0, poolBuildId: buildId || null,
+      image: card.image, fast, deep, at: Date.now(),
+    };
   }
 
   async _metaGet(key) { const db = await this.open(); if (!db) return null; return new Promise(resolve => { const tx = db.transaction('meta', 'readonly'); const r = tx.objectStore('meta').get(key); r.onsuccess = () => resolve(r.result?.value ?? null); r.onerror = () => resolve(null); }); }
