@@ -124,7 +124,56 @@ export class LensRuntime {
   /** The camera permission prompt is open. */
   markCameraPending() { this.cameraPending = true; this.cameraError = null; this._hud(true); }
 
-  toggleDiagnostics() { if (!this.debugNode) return; this.debugNode.hidden = !this.debugNode.hidden; this._renderDebug({ type: 'DIAG' }, true); }
+  toggleDiagnostics() {
+    if (!this.debugNode) return;
+    if (!this.debugNode.querySelector('.diag-text')) {
+      this.debugNode.innerHTML = '<pre class="diag-text"></pre><button type="button" class="diag-share">Partager le diagnostic</button>';
+      this.debugNode.querySelector('.diag-share').addEventListener('click', () => this.shareDiagnostic());
+    }
+    this.debugNode.hidden = !this.debugNode.hidden; this._renderDebug({ type: 'DIAG' }, true);
+  }
+
+  /**
+   * One image that shows what the scanner sees and decides: camera frame with the detected outline,
+   * the rectified crop sent to recognition, the 5 best candidates with scores, decision and timings.
+   * Shared through the system share sheet (or opened) so the user can send it for analysis.
+   */
+  async diagnosticImage() {
+    const W = 900, H = 1300, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const x = cv.getContext('2d'); x.fillStyle = '#111'; x.fillRect(0, 0, W, H);
+    const v = this.video, vw = v.videoWidth || 1, vh = v.videoHeight || 1, fh = 640, fw = Math.round(fh * vw / vh);
+    try {
+      x.drawImage(v, 0, 0, fw, fh);
+      const q = this.tracker.track?.quad;
+      if (q) { x.strokeStyle = '#4fe08a'; x.lineWidth = 4; x.beginPath(); q.forEach((p, i) => (i ? x.lineTo : x.moveTo).call(x, p.x * fw / vw, p.y * fh / vh)); x.closePath(); x.stroke(); }
+    } catch {}
+    if (this.lastCrop) x.drawImage(this.lastCrop, Math.min(fw + 20, W - 300), 0, 280, Math.round(280 * this.lastCrop.height / this.lastCrop.width));
+    const c = this.context, st = this.stats;
+    const lines = [
+      `TCG Lens diagnostic · ${new Date().toISOString()} · ${navigator.userAgent.slice(0, 90)}`,
+      `caméra ${vw}×${vh} · état ${this.stateMachine.state} · mode ${st.mode || 'standard'} · modèle ${st.model} · index ${this.index.count(this.lang)} (${this.lang})`,
+      `détection ${st.detections}/${st.ticks} · ${st.detectMs} ms · ${st.detectSource} · suivi ${this.tracker.track ? `${this.tracker.track.hits} hits` : 'aucun'} · qualité ${Math.round((c?.lastQuality?.score || 0) * 100)}`,
+      `visuel ${st.queries} req · ${st.queryMs} ms · OCR ${st.ocr} · ${st.ocrMs} ms · langue ${st.lang || '-'}`,
+      `décision ${c?.lastDecision ? `${c.lastDecision.decision} ${c.lastDecision.reason}` : '-'}`,
+      `seuils instant ${this.policy.instantScore ?? '-'} / ${this.policy.instantMargin ?? '-'} · temporel ${JSON.stringify(c?.consensus?.summary?.()?.top || {}).slice(0, 120)}`,
+      'Candidats :',
+      ...(this.lastCandidates || []).map((k, i) => `${i + 1}. ${k.id} ${k.name} [${k.set} ${k.number}] ${k.langs} score ${k.score} Δ${k.margin ?? ''} jumeaux ${k.twins ?? 0}`),
+    ];
+    x.fillStyle = '#eee'; x.font = '18px ui-monospace, Menlo, monospace';
+    let y = fh + 34;
+    for (const line of lines) for (let i = 0; i < line.length; i += 78) { x.fillText(line.slice(i, i + 78), 14, y); y += 24; }
+    return new Promise(res => cv.toBlob(b => res(b), 'image/jpeg', 0.85));
+  }
+
+  async shareDiagnostic() {
+    const blob = await this.diagnosticImage();
+    const file = new File([blob], `tcg-lens-diagnostic-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    try {
+      if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: 'Diagnostic TCG Lens' }); return; }
+    } catch {}
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: file.name }); document.body.appendChild(a); a.click(); a.remove();
+  }
 
   pause() { this.paused = true; this.camera.cancel(this.frameHandle); this.frameHandle = null; }
 
@@ -302,9 +351,14 @@ export class LensRuntime {
     const token = c.generation;
     try {
       const q0 = performance.now();
+      this.lastCrop = frame.canvas;
       const candidates = await this.index.query(frame.canvas, this.lang, this.embedding, this.policy.topK, { track: `${track.id}:${c.generation}` });
       this.stats.queries++; this.stats.queryMs = Math.round(performance.now() - q0);
       this.stats.top = candidates[0] ? `${candidates[0].id} ${candidates[0].score.toFixed(3)} Δ${(candidates[0].score - (candidates[1]?.score ?? 0)).toFixed(3)}${candidates[0].embeddingVerified ? '' : ' (rapide)'}` : 'aucun';
+      this.lastCandidates = candidates.slice(0, 5).map((k, i) => ({
+        id: k.id, name: k.name, set: k.setId, number: k.printedNumber || `${k.localId}/${k.printedTotal ?? ''}`, langs: (k.languages || [k.lang]).join('/'),
+        score: k.score?.toFixed(3), margin: i === 0 && Number.isFinite(k.marginNonTwin) ? k.marginNonTwin.toFixed(3) : undefined, twins: i === 0 ? k.twins?.length : undefined,
+      }));
       if (!this._isCurrent(token)) return;
       if (candidates[0]?.calibrated) candidates.splice(0, candidates.length, ...this._resolveTwins(c, candidates));
       c.visualCandidates = candidates;
@@ -682,6 +736,10 @@ export class LensRuntime {
       indexDownload: this.indexDownload,
       lang: this.lang,
     });
+    if (c && !c.locked && this.tracker.track?.stable) {
+      c.analysingSince ??= at;
+      if (at - c.analysingSince > 8000 && !model.action) model.action = { id: 'share-diagnostic', label: 'Envoyer un diagnostic' };
+    }
     this.hud.render(model);
     if (this.tracker.track) this._renderTrack(this.tracker.track);
   }
@@ -765,7 +823,8 @@ export class LensRuntime {
       `décision ${c?.lastDecision ? `${c.lastDecision.decision} ${c.lastDecision.reason}` : '-'}`,
       `dernier évènement ${event.type}`,
     ];
-    this.debugNode.textContent = lines.join('\n');
+    const pre = this.debugNode.querySelector('.diag-text') || this.debugNode;
+    pre.textContent = lines.join('\n');
   }
 }
 

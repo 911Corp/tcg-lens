@@ -332,3 +332,6 @@ video::-webkit-media-controls-overlay-play-button { display: none !important; -w
 .sealed-actions { display: grid; grid-auto-flow: column; gap: 8px; }
 .sealed-actions button { min-height: 42px; border-radius: 999px; font: 600 var(--t-15)/1 var(--display); }
 .sealed-hero { width: min(70vw, 300px); aspect-ratio: 1; object-fit: contain; border-radius: 18px; background: #fff; }
+
+.diag-text { margin: 0; white-space: pre-wrap; font: inherit; }
+.diag-share { margin-top: 8px; min-height: 38px; width: 100%; border: 0; border-radius: 999px; background: var(--chalk); color: #0d0f12; font: 600 var(--t-15)/1 var(--display); }

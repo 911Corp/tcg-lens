@@ -62,7 +62,10 @@
 
   document.querySelector('#scanLang')?.addEventListener('change', e => applyScanLang(e.target.value));
   document.querySelector('#langSelect')?.addEventListener('change', e => applyLang(e.target.value));
-  document.addEventListener('tcglens:action', e => { if (e.detail?.id === 'retry-camera') window.startCamera?.(); });
+  document.addEventListener('tcglens:action', e => {
+    if (e.detail?.id === 'retry-camera') window.startCamera?.();
+    if (e.detail?.id === 'share-diagnostic') window.TCGLiveLens?.runtime?.shareDiagnostic();
+  });
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     if (document.querySelector('#modal.on')) window.closeModal?.(); else window.go('lens');
