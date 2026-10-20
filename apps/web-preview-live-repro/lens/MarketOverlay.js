@@ -49,7 +49,7 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
 }
 
 export class MarketOverlay {
-  constructor(root, { onOpen = null, onDismiss = null } = {}) { this.root = root; this.onOpen = onOpen; this.onDismiss = onDismiss; this.current = null; this.seq = 0; }
+  constructor(root, { onOpen = null, onDismiss = null, onCollect = null } = {}) { this.root = root; this.onOpen = onOpen; this.onDismiss = onDismiss; this.onCollect = onCollect; this.current = null; this.seq = 0; }
 
   clear() { this.seq++; this.current = null; if (this.root) { this.root.hidden = true; this.root.innerHTML = ''; this.root.classList.remove('is-dim'); } }
 
@@ -61,7 +61,7 @@ export class MarketOverlay {
   async showLocked(identity, confidence) {
     if (!identity?.id) return;
     const seq = ++this.seq;
-    this.current = identity;
+    this.current = identity; this.lastCard = null;
     this._paint(lockedSheetModel(identity, null, confidence), identity);
     let card = null;
     try {
@@ -70,7 +70,7 @@ export class MarketOverlay {
       if (response.ok) card = await response.json();
     } catch {}
     if (seq !== this.seq) return; // a newer card (or a clear) happened meanwhile
-    this.current = card || identity;
+    this.current = card || identity; this.lastCard = card;
     this._paint(lockedSheetModel(identity, card || {}, confidence), identity);
   }
 
@@ -90,6 +90,7 @@ export class MarketOverlay {
       <div class="sheet lite" role="group" aria-label="${esc(m.name)}">
         <span class="sheet-grab" aria-hidden="true"></span>
         <button class="sheet-x" type="button" aria-label="Masquer le résultat">×</button>
+        <button class="sheet-add" type="button" aria-label="Ajouter ${esc(m.name)} à la collection">＋</button>
         <button class="sheet-main" type="button" aria-label="Ouvrir la fiche de ${esc(m.name)}">
           <span class="sheet-row"><span class="sheet-name">${esc(m.name)}</span>${price}</span>
           <span class="sheet-meta">${meta}</span>
@@ -99,6 +100,12 @@ export class MarketOverlay {
     const sheet = this.root.querySelector('.sheet');
     sheet.querySelector('.sheet-main').addEventListener('click', () => this.onOpen?.(this.current?.id ? this.current : identity));
     sheet.querySelector('.sheet-x').addEventListener('click', e => { e.stopPropagation(); this.dismiss(); });
+    // v0.3.9: one tap adds the identified printing to the collection (the sheet stays, so a pile can be scanned quickly).
+    sheet.querySelector('.sheet-add').addEventListener('click', e => {
+      e.stopPropagation();
+      const b = e.currentTarget; b.classList.remove('done'); void b.offsetWidth; b.classList.add('done');
+      this.collect(identity, m);
+    });
     // Swipe down (or sideways) to dismiss.
     let x0 = null, y0 = null;
     sheet.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
@@ -114,6 +121,19 @@ export class MarketOverlay {
       x0 = y0 = null;
       if (dy > 60 || Math.abs(dx) > 90) this.dismiss(); else { sheet.style.transform = ''; sheet.style.opacity = ''; }
     });
+  }
+
+  /** Collection entry for the identified printing (language stays unproven if it is). */
+  collect(identity, m) {
+    const card = this.lastCard || {};
+    const detail = {
+      id: identity.id, lang: identity.languageUnverified ? null : identity.lang || null,
+      languageCandidates: identity.languageUnverified ? identity.languageCandidates || [] : undefined,
+      name: m.name, setName: m.setName, number: m.number, image: identity.image || null,
+      market: card.market?.center != null ? { center: card.market.center, currency: card.market.currency || 'EUR', source: card.market.source || null, from: Boolean(card.market.from) && !identity.variantProven } : null,
+    };
+    if (this.onCollect) this.onCollect(detail);
+    else if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('tcglens:collect', { detail }));
   }
 
   /** User closed the result. */

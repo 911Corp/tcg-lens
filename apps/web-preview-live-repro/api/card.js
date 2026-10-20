@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { loadCandidatePool } from './_candidate-pool.js';
 const LANGS = new Set(['fr','en','ja']);
 // v0.3.8: canonical prices (data/card-prices.json, tools/export-card-prices.mjs) first; live TCGdex second.
 const pricesFile = process.env.TCG_LENS_POOL_DIR ? `${process.env.TCG_LENS_POOL_DIR.replace(/\/$/, '')}/card-prices.json` : new URL('../data/card-prices.json', import.meta.url);
@@ -63,11 +64,19 @@ export default async function handler(req,res){
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)){
       try{const upstream=await fetch(`https://api.tcgdex.net/v2/${lang}/cards/${encodeURIComponent(id)}`,{headers:{accept:'application/json'},signal:AbortSignal.timeout(4000)}); if(upstream.ok)c=await upstream.json();}catch{}
     }
-    if(!c&&!canon)return res.status(404).json({error:'not found'});
+    // v0.3.9: identity fields from the canonical pool when TCGdex does not know the printing (TCGplayer gap import).
+    const pooled=(await loadCandidatePool(lang))?.byId?.get(id)||null;
+    if(!c&&!canon&&!pooled)return res.status(404).json({error:'not found'});
     c=c||{id};
+    if(pooled){
+      c={...c,name:c.name||pooled.name,localId:c.localId??pooled.localId,
+        set:c.set||{id:pooled.setId,name:pooled.setName,cardCount:{official:pooled.printedTotal??null}},
+        releaseDate:pooled.releaseDate};
+      if(!c.image&&pooled.image)c.image=pooled.image.replace(/\/low\.webp$/,'');
+    }
     const pricing=canon?canon.pricing:(c.pricing||{});
     const market=canon?canon.market:{...marketFromPricing(pricing),source:pricing.cardmarket?'Cardmarket':pricing.tcgplayer?'TCGplayer':null};
-    const body={id:c.id,name:c.name||null,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?`${c.image}/high.webp`:null,market,priceLang:canon?priceLang:lang,heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
+    const body={id:c.id,name:c.name||null,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?(/\.(jpe?g|png|webp)$/i.test(c.image)?c.image:`${c.image}/high.webp`):null,market,priceLang:canon?priceLang:lang,heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
     res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=3600'); return res.status(200).json(body);
   }catch(e){return res.status(500).json({error:String(e?.message||e)});}
 }

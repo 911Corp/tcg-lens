@@ -30,9 +30,44 @@ function homography(from, to) {
   return h ? [...h, 1] : null;
 }
 
-function applyH(H, x, y) {
-  const d = H[6] * x + H[7] * y + H[8];
-  return { x: (H[0] * x + H[1] * y + H[2]) / d, y: (H[3] * x + H[4] * y + H[5]) / d };
+
+/**
+ * Bilinear projective warp (pure; also used by the frame worker). H maps destination → source pixels.
+ * Returns false on a non-finite projection. v0.3.9: tight loop, no per-pixel objects (~10× faster).
+ */
+export function warpInto(sd, sw, sh, H, od, W, Hh) {
+  const [h0, h1, h2, h3, h4, h5, h6, h7, h8] = H, sw1 = sw - 1, sh1 = sh - 1;
+  let di = 0;
+  for (let y = 0; y < Hh; y++) {
+    let nx = h1 * y + h2, ny = h4 * y + h5, d = h7 * y + h8;
+    for (let x = 0; x < W; x++, nx += h0, ny += h3, d += h6, di += 4) {
+      let px = nx / d, py = ny / d;
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return false;
+      px = px < 0 ? 0 : px > sw1 ? sw1 : px; py = py < 0 ? 0 : py > sh1 ? sh1 : py;
+      const x0 = px | 0, y0 = py | 0, x1 = x0 < sw1 ? x0 + 1 : sw1, y1 = y0 < sh1 ? y0 + 1 : sh1;
+      const fx = px - x0, fy = py - y0, gx = 1 - fx, gy = 1 - fy;
+      const i00 = (y0 * sw + x0) << 2, i10 = (y0 * sw + x1) << 2, i01 = (y1 * sw + x0) << 2, i11 = (y1 * sw + x1) << 2;
+      od[di] = (sd[i00] * gx + sd[i10] * fx) * gy + (sd[i01] * gx + sd[i11] * fx) * fy;
+      od[di + 1] = (sd[i00 + 1] * gx + sd[i10 + 1] * fx) * gy + (sd[i01 + 1] * gx + sd[i11 + 1] * fx) * fy;
+      od[di + 2] = (sd[i00 + 2] * gx + sd[i10 + 2] * fx) * gy + (sd[i01 + 2] * gx + sd[i11 + 2] * fx) * fy;
+      od[di + 3] = 255;
+    }
+  }
+  return true;
+}
+
+/** Card bounding box crop (≈2× the output width) and the quad in crop pixels (shared by page and worker). */
+export function cropPlan(quad, VW, VH, outWidth) {
+  const xs = quad.map(p => p.x), ys = quad.map(p => p.y);
+  const bx = Math.max(0, Math.floor(Math.min(...xs)) - 2), by = Math.max(0, Math.floor(Math.min(...ys)) - 2);
+  const bw = Math.min(VW, Math.ceil(Math.max(...xs)) + 2) - bx, bh = Math.min(VH, Math.ceil(Math.max(...ys)) + 2) - by;
+  const k = Math.min(1, (outWidth * 2) / Math.max(1, bw));
+  return { bx, by, bw, bh, cw: Math.max(1, Math.round(bw * k)), ch: Math.max(1, Math.round(bh * k)), quad: quad.map(p => ({ x: (p.x - bx) * k, y: (p.y - by) * k })) };
+}
+
+export function destinationHomography(quad, W, Hh) {
+  const H = homography([{ x: 0, y: 0 }, { x: W - 1, y: 0 }, { x: W - 1, y: Hh - 1 }, { x: 0, y: Hh - 1 }], quad);
+  return H && !H.some(v => !Number.isFinite(v)) ? H : null;
 }
 
 export class PerspectiveRectifier {
@@ -41,6 +76,19 @@ export class PerspectiveRectifier {
     this.height = Math.round(width / aspect);
     this.source = document.createElement('canvas');
     this.lastValidation = null;
+  }
+
+  /** Same as rectify(), done in the frame worker on the frame it just analysed (no page stall). */
+  async rectifyAsync(video, quad, frames) {
+    if (!frames?.ready || !video?.videoWidth) return this.rectify(video, quad);
+    this.lastValidation = validateCardQuad(quad, video.videoWidth, video.videoHeight);
+    if (!this.lastValidation.valid) return null;
+    let res;
+    try { res = await frames.rectify(quad, this.width, this.height); } catch { return this.rectify(video, quad); }
+    if (!res) { this.lastValidation = { ...this.lastValidation, valid: false, score: 0, reason: 'unstable_homography' }; return null; }
+    const out = document.createElement('canvas'); out.width = this.width; out.height = this.height;
+    out.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(res), this.width, this.height), 0, 0);
+    return out;
   }
 
   rectify(video, quad) {
@@ -72,25 +120,9 @@ export class PerspectiveRectifier {
       this.lastValidation = { ...this.lastValidation, valid: false, score: 0, reason: 'unstable_homography' };
       return null;
     }
-    const sw = src.width, sh = src.height, sd = sourceData.data, od = output.data;
-    const sample = (x, y, channel) => {
-      const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(sw - 1, x0 + 1), y1 = Math.min(sh - 1, y0 + 1);
-      const fx = x - x0, fy = y - y0;
-      const i00 = (y0 * sw + x0) * 4 + channel, i10 = (y0 * sw + x1) * 4 + channel;
-      const i01 = (y1 * sw + x0) * 4 + channel, i11 = (y1 * sw + x1) * 4 + channel;
-      const top = sd[i00] * (1 - fx) + sd[i10] * fx;
-      const bottom = sd[i01] * (1 - fx) + sd[i11] * fx;
-      return top * (1 - fy) + bottom * fy;
-    };
-    for (let y = 0; y < out.height; y++) for (let x = 0; x < out.width; x++) {
-      const p = applyH(H, x, y);
-      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) {
-        this.lastValidation = { ...this.lastValidation, valid: false, score: 0, reason: 'non_finite_projection' };
-        return null;
-      }
-      const sx = Math.max(0, Math.min(sw - 1, p.x)), sy = Math.max(0, Math.min(sh - 1, p.y));
-      const di = (y * out.width + x) * 4;
-      od[di] = sample(sx, sy, 0); od[di + 1] = sample(sx, sy, 1); od[di + 2] = sample(sx, sy, 2); od[di + 3] = 255;
+    if (!warpInto(sourceData.data, src.width, src.height, H, output.data, out.width, out.height)) {
+      this.lastValidation = { ...this.lastValidation, valid: false, score: 0, reason: 'non_finite_projection' };
+      return null;
     }
     octx.putImageData(output, 0, 0);
     return out;

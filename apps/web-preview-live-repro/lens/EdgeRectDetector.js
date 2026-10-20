@@ -25,6 +25,27 @@ export class EdgeRectDetector {
     this.ctx = this.canvas?.getContext('2d', { willReadFrequently: true }) || null;
   }
 
+  /** Small RGBA copy of the frame (what detectRect works on). */
+  grab(source) {
+    const VW = source.videoWidth || source.width, VH = source.videoHeight || source.height;
+    if (!VW || !VH || !this.ctx) return null;
+    const w = this.width, h = Math.round(VH / VW * w);
+    this.canvas.width = w; this.canvas.height = h;
+    this.ctx.drawImage(source, 0, 0, w, h);
+    return { rgba: this.ctx.getImageData(0, 0, w, h).data, w, h, scale: VW / w };
+  }
+
+  hintAngles(angleHint) { return [-3, -1.5, 0, 1.5, 3].map(d => angleHint + d * Math.PI / 180); }
+
+  /** detectRect output (detector pixels) → detection in video pixels. */
+  toDetection(found, scale) {
+    if (!found) return [];
+    const quad = found.quad.map(p => ({ x: p.x * scale, y: p.y * scale }));
+    const xs = quad.map(p => p.x), ys = quad.map(p => p.y);
+    const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    return [{ box, quad, score: found.score, coverage: found.coverage, angle: found.th, source: 'edge-rect' }];
+  }
+
   /** @param {{ angleHint?: number }} [opts] radians of the tracked card: search ±3° around it only. */
   detect(source, opts = {}) {
     const VW = source.videoWidth || source.width, VH = source.videoHeight || source.height;
@@ -45,7 +66,44 @@ export class EdgeRectDetector {
 }
 
 /** Core search on an RGBA buffer (exported for tests). */
-export function detectRect(rgba, w, h, angles, minCoverage = 0.5) {
+export function detectRect(rgba, w, h, angles, minCoverage = 0.5, opts = {}) {
+  const prep = prepareEdges(rgba, w, h);
+  return prep ? searchRect(prep, angles, minCoverage, opts) : null;
+}
+
+/**
+ * v0.3.9 — several cards in one frame (multi-card mode): repeated search, each new card must not overlap a
+ * card already found. Smaller cards allowed (minWidthFrac). Same verification as the single-card search.
+ */
+export function detectRects(rgba, w, h, angles, minCoverage = 0.5, { max = 6, minWidthFrac = 0.1 } = {}) {
+  const prep = prepareEdges(rgba, w, h); if (!prep) return [];
+  const found = [];
+  for (let k = 0; k < max; k++) {
+    const r = searchRect(prep, angles, minCoverage, { minWidthFrac, exclude: found.map(f => f.quad) });
+    if (!r) break;
+    found.push(r);
+  }
+  return found;
+}
+
+function inside(pt, quad) {
+  let c = false;
+  for (let i = 0, j = 3; i < 4; j = i++) {
+    const a = quad[i], b = quad[j];
+    if ((a.y > pt.y) !== (b.y > pt.y) && pt.x < (b.x - a.x) * (pt.y - a.y) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+/** A hypothesis overlaps an already found card: its centre or one of its corners pulled 20 % inwards lies inside. */
+function overlaps(quad, exclude) {
+  if (!exclude?.length) return false;
+  const cx = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4, cy = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4;
+  const pts = [{ x: cx, y: cy }, ...quad.map(p => ({ x: p.x + (cx - p.x) * 0.2, y: p.y + (cy - p.y) * 0.2 }))];
+  return exclude.some(q => pts.some(p => inside(p, q)) || inside({ x: (q[0].x + q[2].x) / 2, y: (q[0].y + q[2].y) / 2 }, quad));
+}
+
+/** Gradients and strong edge pixels (shared by single and multi search). */
+export function prepareEdges(rgba, w, h) {
   const n = w * h, gray = new Float32Array(n);
   for (let i = 0, p = 0; p < n; i += 4, p++) gray[p] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
   // Max over channels catches colour-only borders (yellow card on beige table).
@@ -72,7 +130,11 @@ export function detectRect(rgba, w, h, angles, minCoverage = 0.5) {
     ex.push(x); ey.push(y); ew.push(Math.min(mag[p], thr * 4)); eg.push(p);
   }
   if (ex.length < 40) return null;
+  return { w, h, gx, gy, mag, thr, ex, ey, ew, eg };
+}
 
+export function searchRect(prep, angles, minCoverage = 0.5, { minWidthFrac = 0.22, exclude = null } = {}) {
+  const { w, h, gx, gy, mag, thr, ex, ey, ew, eg } = prep;
   const diag = Math.ceil(Math.hypot(w, h)) + 2, E = ex.length;
   const uArr = new Float32Array(E), vArr = new Float32Array(E), isV = new Uint8Array(E), isH = new Uint8Array(E);
   let best = null; const all = [];
@@ -91,11 +153,11 @@ export function detectRect(rgba, w, h, angles, minCoverage = 0.5) {
     const pairs = [];
     for (let a = 0; a < uPeaks.length; a++) for (let b = a + 1; b < uPeaks.length; b++) {
       const width = uPeaks[b] - uPeaks[a];
-      if (width < w * 0.22 || width > w * 0.98 || width / ASPECT > h * 1.02) continue;
+      if (width < w * minWidthFrac || width > w * 0.98 || width / ASPECT > h * 1.02) continue;
       pairs.push([uPeaks[a], uPeaks[b], Us[uPeaks[a]] + Us[uPeaks[b]]]);
     }
     pairs.sort((x, y) => y[2] - x[2]);
-    for (const [L, R] of pairs.slice(0, 10)) {
+    for (const [L, R] of pairs.slice(0, exclude ? 24 : 10)) {
       const width = R - L, H = width / ASPECT;
       const Vb = new Float32Array(diag * 2);
       for (let i = 0; i < E; i++) if (isH[i] && uArr[i] >= L - 1 && uArr[i] <= R + 1) Vb[Math.round(vArr[i])] += ew[i];
@@ -107,6 +169,7 @@ export function detectRect(rgba, w, h, angles, minCoverage = 0.5) {
         const key = `${Math.round(T)}:${Math.round(B)}`; if (tried.has(key)) return; tried.add(key);
         const quad = corners(L - diag, R - diag, T - diag, B - diag, c, s);
         if (quad.some(q => q.x < -2 || q.y < -2 || q.x > w + 1 || q.y > h + 1)) return;
+        if (exclude && overlaps(quad, exclude)) return;
         const cov = coverage(quad, gx, gy, mag, w, h, thr * 0.75);
         const sorted = [...cov].sort((x, y) => x - y);
         // Mean of the three best sides (one side may be occluded), the worst side must still exist a bit.

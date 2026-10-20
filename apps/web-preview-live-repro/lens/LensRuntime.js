@@ -1,3 +1,5 @@
+import { FrameWorker } from './FrameWorker.js';
+import { MultiScan } from './MultiScan.js';
 import { DEFAULT_POLICY, LENS_STATES, CALIBRATED_POLICY } from './config.js';
 
 // Language belongs to the physical card in the track, whatever candidate is on top.
@@ -27,7 +29,7 @@ import { detectCardLanguage, LanguageConsensus } from './LanguageEvidence.js';
 import { scopeLangs } from './ANNIndex.js';
 
 export class LensRuntime {
-  constructor({ video, trackLayer, resultOverlay, hudRoot = null, statusPill = null, debugNode = null, policy = {} }) {
+  constructor({ video, trackLayer, resultOverlay, hudRoot = null, statusPill = null, debugNode = null, multiLayer = null, policy = {} }) {
     this.policy = { ...DEFAULT_POLICY, ...policy };
     this.video = video;
     this.trackLayer = trackLayer;
@@ -42,7 +44,9 @@ export class LensRuntime {
     this.debugNode = debugNode;
     this.camera = new CameraAdapter(video);
     this.sampler = new FrameSampler(this.policy.detectorIntervalMs);
-    this.detector = new CardDetector();
+    this.frames = FrameWorker.supported() ? new FrameWorker() : null;
+    this.multiMode = false; this.multiLayer = multiLayer; this.multi = null;
+    this.detector = new CardDetector({ frames: this.frames });
     this.tracker = new TrackManager(this.policy);
     this.rectifier = new PerspectiveRectifier({ width: this.policy.rectifiedWidth, aspect: this.policy.cardAspect });
     // OCR reads small print (001/084, PV/HP): it gets its own high-resolution rectification.
@@ -266,8 +270,11 @@ export class LensRuntime {
       if (this.barcodeSeenAt && at - this.barcodeSeenAt > 6000) { this.barcodeSeenAt = null; document.dispatchEvent(new CustomEvent('tcglens:barcode-gone')); }
       return;
     }
+    if (this.multiMode) { await this.multi.tick(at); this._hud(); this._maybeBarcode(at); return; }
     const d0 = performance.now();
-    const detections = this.detector.detect(this.video, { angleHint: this.tracker.track?.angle ?? undefined });
+    const opts = { angleHint: this.tracker.track?.angle ?? undefined };
+    const detections = this.detector.detectAsync ? await this.detector.detectAsync(this.video, opts) : this.detector.detect(this.video, opts);
+    if (!this.running || this.paused || this.sealedMode) return;
     this.stats.ticks++; this.stats.detectMs = Math.round(performance.now() - d0);
     if (detections.length) { this.stats.detections++; this.stats.detectSource = detections[0].source || '-'; }
     const priorGeneration = this.tracker.track?.generation;
@@ -293,7 +300,8 @@ export class LensRuntime {
     }
 
     if (this.stateMachine.state === LENS_STATES.TRACKING || this.stateMachine.state === LENS_STATES.UNKNOWN || this.stateMachine.state === LENS_STATES.AMBIGUOUS) this._safeTransition(LENS_STATES.ANALYZING, { generation: track.generation });
-    const rectified = this.rectifier.rectify(this.video, track.quad);
+    const rectified = await this.rectifier.rectifyAsync(this.video, track.quad, this.frames);
+    if (!this.running || this.paused || !this.context) return;
     if (!rectified) { this.telemetry.emit('RECTIFY_FAIL', this.rectifier.lastValidation || {}); this._hud(); return; }
     const quality = { ...this.quality.score(rectified), geometry: this.rectifier.lastValidation?.score ?? 0 };
     this.context.lastQuality = quality;
@@ -309,7 +317,7 @@ export class LensRuntime {
     // (artwork twins, ambiguity) or after the lock to read the language, keeping the CPU for vision.
     const ocrNeeded = !this.policy.calibratedInstant || languagePending
       || ['artwork_twins', 'language_unresolved', 'visual_candidate_needs_corroboration', 'visual_only_lock_not_permitted_for_candidate_set', 'top1_top2_margin_too_small'].includes(this.context.lastDecision?.reason);
-    if (ocrNeeded && (!locked || languagePending) && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, this.ocrRectifier.rectify(this.video, track.quad) || accepted?.canvas || this.bestFrame.best?.canvas || rectified);
+    if (ocrNeeded && (!locked || languagePending) && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, (await this.ocrRectifier.rectifyAsync(this.video, track.quad, this.frames)) || accepted?.canvas || this.bestFrame.best?.canvas || rectified);
     this._maybeBarcode(at);
     this._hud();
   }
@@ -624,6 +632,24 @@ export class LensRuntime {
     if (c.presenceMiss < (this.policy.presenceMissVotes ?? 2)) return true;
     this.releaseLock('card_left_image');
     return false;
+  }
+
+  /**
+   * v0.3.9 — multi-card mode on/off. Needs the frame worker (detection of several cards per frame is too heavy
+   * for the page); returns false when unavailable.
+   */
+  setMultiMode(on) {
+    on = Boolean(on);
+    if (on && !this.frames?.ready) return false;
+    if (on === this.multiMode) return true;
+    this.multiMode = on;
+    this.tracker.reset(); this.context = null; this.bestFrame.reset(); this._renderTrack(null);
+    this.marketOverlay.clear(); this.stateMachine.reset({ reason: on ? 'multi_mode' : 'single_mode' });
+    if (!this.multi) this.multi = new MultiScan(this, this.multiLayer);
+    this.multi.reset(); this.multi.render();
+    this.telemetry.emit('MULTI_MODE', { on });
+    this._hud(true);
+    return true;
   }
 
   /** Release the identified card (left the image): result hidden, a new analysis starts. */

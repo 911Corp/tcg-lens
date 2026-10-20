@@ -14,7 +14,13 @@ function ensureRuntime() {
     resultOverlay: $('#lensResultOverlay'),
     hudRoot: $('#lensHud'),
     debugNode: debug,
+    multiLayer: $('#multiLayer'),
   });
+  // v0.3.9: multi-card mode toggle (remembered on this device).
+  const btn = $('#multiToggle');
+  const apply = on => { const ok = runtime.setMultiMode(on); btn?.setAttribute('aria-pressed', String(ok && on)); if (on && !ok) window.toast?.('Mode plusieurs cartes indisponible sur cet appareil'); return ok && on; };
+  btn?.addEventListener('click', () => { const on = apply(!runtime.multiMode); try { localStorage.setItem('multiMode', on ? '1' : '0'); } catch {} window.toast?.(on ? 'Mode plusieurs cartes' : 'Mode une carte'); });
+  try { if (localStorage.getItem('multiMode') === '1') { const t = setInterval(() => { if (runtime.frames?.ready || runtime.frames?.broken || !runtime.frames) { clearInterval(t); apply(true); } }, 200); } } catch {}
   return runtime;
 }
 

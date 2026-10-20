@@ -19,7 +19,20 @@ function extremeQuad(points) {
  * for strongly rotated cards. While a card is tracked, only angles near its own are searched.
  */
 export class CardDetector {
-  constructor(opts = {}) { this.edge = new EdgeRectDetector(); this.blob = new BlobCardDetector(opts); }
+  constructor(opts = {}) { this.edge = new EdgeRectDetector(); this.blob = new BlobCardDetector(opts); this.frames = opts.frames || null; }
+
+  /** v0.3.9: same result as detect(), computed in the frame worker when it is available. */
+  async detectAsync(video, { angleHint } = {}) {
+    const f = this.frames;
+    if (!f?.ready || !video?.videoWidth) return this.detect(video, { angleHint });
+    const angleSets = [...(Number.isFinite(angleHint) ? [this.edge.hintAngles(angleHint)] : []), this.edge.angles];
+    let r;
+    try { r = await f.detect(video, { detW: this.edge.width, angleSets, minCoverage: this.edge.minCoverage }); }
+    catch { return this.detect(video, { angleHint }); }
+    const edge = this.edge.toDetection(r.found, r.scale);
+    if (edge.length) return edge;
+    return this.blob.detect(video).map(d => ({ ...d, source: 'blob' }));
+  }
 
   detect(video, { angleHint } = {}) {
     if (Number.isFinite(angleHint)) {

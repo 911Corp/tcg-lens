@@ -15,8 +15,9 @@ export async function loadCandidatePool(lang) {
     const target = dir ? `${dir.replace(/\/$/, '')}/candidate-pool-${lang}.json` : new URL(`../data/candidate-pool-${lang}.json`, import.meta.url);
     const pool = JSON.parse(await fs.readFile(target, 'utf8'));
     if (pool?.schema !== 'tcg-lens-candidate-pool-v1' || !Array.isArray(pool.items)) return null;
-    const byNumber = new Map();
+    const byNumber = new Map(), byId = new Map();
     for (const item of pool.items) {
+      if (!byId.has(item.id)) byId.set(item.id, item);
       // Index by the number printed on the card too (Classic Collection "4/102").
       const printed = item.printedNumber ? normalizeNumber(String(item.printedNumber).split('/')[0]) : null;
       if (printed && printed !== normalizeNumber(item.localId)) { if (!byNumber.has(printed)) byNumber.set(printed, []); byNumber.get(printed).push(item); }
@@ -24,7 +25,7 @@ export async function loadCandidatePool(lang) {
       if (!byNumber.has(key)) byNumber.set(key, []);
       byNumber.get(key).push(item);
     }
-    const loaded = { ...pool, byNumber };
+    const loaded = { ...pool, byNumber, byId };
     cache.set(lang, loaded);
     return loaded;
   } catch {

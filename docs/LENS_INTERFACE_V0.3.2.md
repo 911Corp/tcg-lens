@@ -234,3 +234,31 @@ mise à jour, le nouvel index est chargé dès le premier lancement et jamais m�
 Pipeline après ajout de données : `tcgplayer:gaps` → `images:probe` → `build:coverage` → `fetch-ref-images.mjs` →
 `build-visual-index.mjs` → `embed-references.mjs` (cache) → `camera-crops.mjs` → `train-and-export.py` →
 `export-card-prices.mjs` → déploiement.
+
+## v0.3.9 — fluidité, collection, mode plusieurs cartes
+
+**Fluidité** (profil CPU, 14 s de scan, Chromium logiciel) : fil principal bloqué 5,4 s → 2,1 s, pire blocage
+1 239 ms → 172 ms, temps libre du fil principal 3,8 s → 7,7 s.
+- `lens/FrameWorker.js` + `lens/frame.worker.js` : l'image caméra est capturée par `createImageBitmap` (asynchrone)
+  et transférée à un worker qui fait la recherche de contours **et** le redressement de la carte sur cette même image.
+  Repli automatique sur le chemin dans la page (mêmes fonctions pures) si le worker manque ou échoue.
+- `warpInto` : boucle de redressement sans objets ni fermetures par pixel (~10× plus rapide, résultat identique).
+- `lens/dotWasm.js` (généré depuis `tools/wasm/dot.wat`) : produits scalaires int8 × float32 en WebAssembly SIMD
+  pour les 54 265 références (mêmes scores à 1e-4 près, test d'équivalence) ; repli JS.
+- Codes-barres sans détecteur natif (iPhone) : décodage zxing dans `lens/barcode.worker.js`.
+
+**Fiche détaillée** : `/api/card` complète nom, extension, numéro et image depuis le pool canonique quand TCGdex ne
+connaît pas l'impression (cartes importées de TCGplayer).
+
+**Collection** (`collection.js`, logique pure `lens/collectionModel.js`) : ＋ sur la fiche de scan (ajout sans quitter
+le scanner, ×2, ×3…), quantités ± et retrait, valeur totale par devise (EUR et USD jamais convertis), tri, export CSV
+(point-virgule, décimales françaises, partage natif sur mobile), actualisation des prix. Une carte dont la langue
+n'est pas prouvée garde ses langues candidates (« FR/EN ? ») et n'est jamais fusionnée avec une langue prouvée.
+
+**Mode plusieurs cartes** (`lens/MultiScan.js`, bouton en haut à gauche) : jusqu'à 6 cartes par image
+(`detectRects`, dans le worker). Une carte n'est nommée qu'avec les règles du verrou instantané (index calibré, set
+visuellement complet, aucun blocage, score/marge/qualité ≥ seuils calibrés) sur 2 passages concordants au même
+endroit ; les jumelles d'illustration ne sont écartées que par la preuve visuelle d'écriture calibrée
+(`twinFreeByScript`, même règle que `_resolveTwins`). Sinon « ? — à scanner seule » (pas d'OCR dans ce mode, langue
+jamais affirmée). Barre de total et « Tout ajouter ». Sur la scène de test à 4 cartes : 2 nommées, 2 « ? » (jumelles
+japonaises trop proches visuellement, écart 0,036–0,048 < 0,07), aucune erreur.

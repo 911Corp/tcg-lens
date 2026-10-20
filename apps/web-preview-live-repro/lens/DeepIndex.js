@@ -13,6 +13,22 @@
  * twins needs printed evidence (language, number) to pick the printing.
  */
 import { versionedFetch } from './indexVersion.js';
+import { DOT_WASM_BASE64 } from './dotWasm.js';
+
+/** v0.3.9 — WebAssembly SIMD dot products (same scores as the JS loop to ~1e-6), JS fallback. */
+function createDotEngine() {
+  try {
+    const bytes = typeof atob === 'function' ? Uint8Array.from(atob(DOT_WASM_BASE64), c => c.charCodeAt(0)) : Uint8Array.from(Buffer.from(DOT_WASM_BASE64, 'base64'));
+    if (!WebAssembly.validate(bytes)) return null;
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), {});
+    const mem = inst.exports.mem; let top = 1024; // [0, 1024): query
+    const alloc = bytes => { const off = top; top = (top + bytes + 15) & ~15; const need = Math.ceil(top / 65536) - mem.buffer.byteLength / 65536; if (need > 0) mem.grow(need); return off; };
+    return {
+      add(vec, n) { const vOff = alloc(vec.length), oOff = alloc(n * 4); new Int8Array(mem.buffer, vOff, vec.length).set(vec); return { vOff, oOff }; },
+      scores(q, slot, n, dims) { new Float32Array(mem.buffer, 0, dims).set(q); inst.exports.scores(0, slot.vOff, n, dims, slot.oOff); return new Float32Array(mem.buffer, slot.oOff, n); },
+    };
+  } catch { return null; }
+}
 
 export const DEEP_SCHEMA = 'tcg-lens-deep-index-v1';
 
@@ -23,6 +39,7 @@ export class DeepIndex {
     this.langs = new Map();          // lang -> { vec: Int8Array, n, fam: Int32Array }
     this.famIds = []; this.famIndex = new Map(); this.famLangs = []; this.famRows = [];
     this.twinCache = new Map(); this.loading = new Map();
+    this.dot = typeof WebAssembly === 'object' && !globalThis.__TCG_LENS_NO_WASM ? createDotEngine() : null;
   }
 
   isLoaded(lang) { return this.langs.has(lang); }
@@ -71,7 +88,8 @@ export class DeepIndex {
         if (!this.famLangs[f].includes(lang)) this.famLangs[f].push(lang);
         this.famRows[f].push([lang, i]);
       }
-      this.langs.set(lang, { vec, n, fam });
+      const slot = this.dot && D % 16 === 0 ? this.dot.add(vec, n) : null;
+      this.langs.set(lang, { vec, n, fam, slot });
       this.twinCache.clear();
     })());
     return this.loading.get(lang);
@@ -96,6 +114,11 @@ export class DeepIndex {
     for (const lang of langs) {
       const L = this.langs.get(lang); if (!L) continue;
       const { vec, n, fam } = L;
+      if (L.slot) {
+        const sc = this.dot.scores(q, L.slot, n, D);
+        for (let i = 0; i < n; i++) { const s = sc[i], f = fam[i]; if (s > best[f]) best[f] = s; }
+        continue;
+      }
       for (let i = 0, off = 0; i < n; i++, off += D) {
         let s = 0; for (let d = 0; d < D; d++) s += q[d] * vec[off + d];
         s /= 127; const f = fam[i]; if (s > best[f]) best[f] = s;
