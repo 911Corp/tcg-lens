@@ -112,6 +112,8 @@
     'La caméra n’a pas pu démarrer. Réessayez.': 'The camera couldn’t start. Try again.',
 
     // ---------------------------------------------------------------- result sheet, card details, market
+    'Est-ce cette carte ?': 'Is this your card?', 'Aucune de ces cartes': 'None of these', 'Numéro concordant': 'Number matches', 'Très probable': 'Very likely', 'Probable': 'Likely',
+    'Déjà confirmée par vous': 'You confirmed it before', 'Même illustration': 'Same artwork', 'Confirmée par vous': 'Confirmed by you',
     'Masquer le résultat': 'Hide result', 'Prix n.d.': 'No price', 'Extension inconnue': 'Unknown set', 'Langue ?': 'Language?', 'Carte': 'Card',
     'dès {price}': 'from {price}', 'Ajouter {name} à la collection': 'Add {name} to collection', 'Ouvrir la fiche de {name}': 'Open {name}',
     'En hausse': 'Rising', 'En baisse': 'Falling', 'Stable': 'Stable', 'Tendance inconnue': 'Trend unknown',

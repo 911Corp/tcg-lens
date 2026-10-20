@@ -1,5 +1,7 @@
 import { FrameWorker } from './FrameWorker.js';
 import { MultiScan } from './MultiScan.js';
+import { ProposalTracker, stablePrintedRead } from './Proposals.js';
+import { ScanMemory } from './ScanMemory.js';
 import { DEFAULT_POLICY, LENS_STATES, CALIBRATED_POLICY } from './config.js';
 
 // Language belongs to the physical card in the track, whatever candidate is on top.
@@ -46,6 +48,7 @@ export class LensRuntime {
     this.sampler = new FrameSampler(this.policy.detectorIntervalMs);
     this.frames = FrameWorker.supported() ? new FrameWorker() : null;
     this.multiMode = false; this.multiLayer = multiLayer; this.multi = null;
+    this.memory = new ScanMemory();
     this.detector = new CardDetector({ frames: this.frames });
     this.tracker = new TrackManager(this.policy);
     this.rectifier = new PerspectiveRectifier({ width: this.policy.rectifiedWidth, aspect: this.policy.cardAspect });
@@ -61,7 +64,8 @@ export class LensRuntime {
     this.resolver = new CanonicalResolver();
     this.telemetry = new Telemetry({ onEvent: e => this._renderDebug(e) });
     this.stateMachine = new LensStateMachine(({ state, detail }) => this._renderState(state, detail));
-    this.marketOverlay = new MarketOverlay(resultOverlay, { onOpen: card => window.openCard?.(card.id, card.lang || this.lang), onDismiss: () => this.dismissResult() });
+    this.marketOverlay = new MarketOverlay(resultOverlay, { onOpen: card => window.openCard?.(card.id, card.lang || this.lang), onDismiss: () => this.dismissResult(),
+      onConfirm: id => this.confirmProposal(id), onReject: () => this.rejectProposals() });
     this.running = false;
     this.paused = false;
     this.frameHandle = null;
@@ -348,6 +352,8 @@ export class LensRuntime {
       lastQuality: null,
       // Automatic scan: even a single-language printing needs one agreeing printed-language read.
       langConsensus: new LanguageConsensus({ singleLanguageReads: this.lang === 'auto' ? 1 : 0 }),
+      // v0.4.1 proposals: calibrated, temporally consistent, never contradicted by printed evidence.
+      proposals: new ProposalTracker(), ocrTexts: [], proposalsShown: '', proposalsRejected: false, startedAt: performance.now(),
     };
     this.bestFrame.reset();
     if (resetState) this.stateMachine.reset({ reason, generation: track.generation, trackId: track.id });
@@ -398,7 +404,11 @@ export class LensRuntime {
         temporalPending: temporal.pendingSwitch, temporalEpoch: temporal.epoch,
       });
       if (c.locked) { if (this._checkPresence(c, candidates)) this._observePossibleChange(top, margin); return; }
+      c.lastQuery = candidates.query || null;
+      const cal = this.index.deep?.meta?.calibration?.proposals;
+      if (cal && candidates.ranked) c.proposals.observe(candidates.ranked, cal, this.memory.match(candidates.query));
       this._evaluateEvidence();
+      this._updateProposals(c);
       if (forced && !c.locked && frame.quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, frame.canvas);
     } catch (error) {
       this.telemetry.emit('VISUAL_ERROR', { message: error.message });
@@ -505,6 +515,7 @@ export class LensRuntime {
         });
         return;
       }
+      if (evidence.text) { c.ocrTexts.push(evidence.text); if (c.ocrTexts.length > 8) c.ocrTexts.shift(); }
       this._observeLanguage(c, evidence, token.candidateId);
       if (c.locked) { this._afterLockLanguage(c); return; }
       const consensusEvidence = c.ocrConsensus.observe(evidence, token.candidateId);
@@ -684,6 +695,76 @@ export class LensRuntime {
     }
     if (this.multi) { this.multi.prices.clear(); this.multi.render(); }
     this.lastHudAt = 0; this._hud(true);
+  }
+
+  /**
+   * v0.4.1 — proposals while nothing is identified: after 1.2 s of analysis (or as soon as the decision is
+   * AMBIGUOUS), the stable calibrated proposals of this card are shown; the user confirms one or rejects them.
+   */
+  _updateProposals(c) {
+    if (!c || c.locked || c.proposalsRejected || this.multiMode) return;
+    const st = this.stateMachine.state;
+    if (st === LENS_STATES.LOCKED || st === LENS_STATES.CHANGE_PENDING) return;
+    if (st !== LENS_STATES.AMBIGUOUS && performance.now() - c.startedAt < 1200) return;
+    const evidence = { printed: stablePrintedRead(c.ocrTexts), language: c.langConsensus.resolved(CARD) };
+    const list = c.proposals.stable(c.visualCandidates, evidence);
+    const sig = list.map(x => `${x.id}:${x.numberMatch ? 1 : 0}`).join(',');
+    if (sig === c.proposalsShown) return;
+    c.proposalsShown = sig;
+    if (!list.length) { this.marketOverlay.clear(); return; }
+    // Artwork twins of the leading proposal (same illustration in other printings, reference similarity ≥ 0.8)
+    // are proposed with it: the picture alone cannot tell them apart, the user can.
+    const lead = c.visualCandidates.find(k => k.id === list[0].id);
+    for (const tw of (lead?.twins || []).slice().sort((a, b) => (lead.twinScores?.[b.id] ?? 0) - (lead.twinScores?.[a.id] ?? 0))) {
+      if (list.length >= 3) break;
+      const cand = c.visualCandidates.find(k => k.id === tw.id);
+      if (!cand || list.some(x => x.id === tw.id)) continue;
+      const langs = cand.languages?.length ? cand.languages : [cand.lang];
+      if (evidence.language && !langs.includes(evidence.language)) continue;
+      list.push({ id: tw.id, p: list[0].p, twin: true, numberMatch: false });
+    }
+    const items = list.map(x => {
+      const cand = c.visualCandidates.find(k => k.id === x.id);
+      const row = (evidence.language && cand.byLang?.[evidence.language])
+        || cand.byLang?.[(document.documentElement.lang || 'fr').slice(0, 2)] || cand;
+      return { ...row, languages: cand.languages, p: x.p, numberMatch: x.numberMatch, remembered: x.remembered, twin: Boolean(x.twin) };
+    });
+    this.telemetry.emit('PROPOSALS', { ids: list.map(x => x.id), p: list.map(x => Math.round(x.p * 100) / 100) });
+    this.marketOverlay.showProposals(items);
+  }
+
+  /** The user confirmed a proposal: it becomes the result, marked as confirmed by the user. */
+  confirmProposal(id) {
+    const c = this.context; if (!c || c.locked) return false;
+    const cand = c.visualCandidates.find(k => k.id === id); if (!cand) return false;
+    const lang = c.langConsensus.resolved(CARD);
+    const row = (lang && cand.byLang?.[lang]) || (cand.languages?.length === 1 && cand.byLang?.[cand.languages[0]])
+      || cand.byLang?.[(document.documentElement.lang || 'fr').slice(0, 2)] || cand;
+    const { byLang, languages, ...printing } = row;
+    const identity = lang
+      ? { ...printing, lang, userConfirmed: true }
+      : { ...printing, lang: null, languageUnverified: true, languageCandidates: cand.languages || [printing.lang].filter(Boolean), userConfirmed: true };
+    // Legal path to LOCKED: (UNKNOWN →) ANALYZING → VERIFYING → LOCKED, or AMBIGUOUS → VERIFYING → LOCKED.
+    if (this.stateMachine.state === LENS_STATES.UNKNOWN) this._safeTransition(LENS_STATES.ANALYZING, { id, reason: 'user_confirmed_proposal' });
+    if (this.stateMachine.state !== LENS_STATES.VERIFYING) this._safeTransition(LENS_STATES.VERIFYING, { candidateId: id, reason: 'user_confirmed_proposal' });
+    if (!this._safeTransition(LENS_STATES.LOCKED, { id, reason: 'user_confirmed_proposal' })) {
+      this.telemetry.emit('PROPOSAL_CONFIRM_REJECTED_STATE', { id, state: this.stateMachine.state });
+      return false;
+    }
+    c.locked = { id, confidence: 0, identity, group: [id], userConfirmed: true };
+    if (c.lastQuery) this.memory.add(id, c.lastQuery, { languages: cand.languages || [] });
+    this.telemetry.emit('PROPOSAL_CONFIRMED', { id, memory: this.memory.size });
+    document.dispatchEvent(new CustomEvent('tcglens:card-locked', { detail: identity }));
+    this.marketOverlay.showLocked(identity, 0);
+    this._renderTrack(this.tracker.track); this._hud(true);
+    return true;
+  }
+
+  /** "None of these": no more proposals for this card (until another card is presented). */
+  rejectProposals() {
+    const c = this.context; if (!c) return;
+    c.proposalsRejected = true; this.marketOverlay.clear();
+    this.telemetry.emit('PROPOSALS_REJECTED', { shown: c.proposalsShown });
   }
 
   /** Release the identified card (left the image): result hidden, a new analysis starts. */

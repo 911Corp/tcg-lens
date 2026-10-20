@@ -286,3 +286,25 @@ japonaises trop proches visuellement, écart 0,036–0,048 < 0,07), aucune erreu
 - Worker d’image en panne → le scan continue dans la page, nouveau worker 10 s plus tard (3 fois au plus par session).
 - Vibration seulement après un premier geste de l’utilisateur.
 - Nom affiché quand la langue n’est pas prouvée : celui de la langue de l’application (plus celle du téléphone).
+
+## v0.4.1 — propositions calibrées et apprentissage sur l’appareil
+
+Quand rien n’est identifié, l’app propose plutôt que de rester muette, sans jamais toucher aux règles
+d’identification automatique (FCIR 0 inchangé).
+- **Probabilité calibrée** (`tools/deep/calibrate-proposals.py` → `calibration.proposals`) : régression logistique sur
+  le classement (score, écart au premier, écart au suivant, rang, marge), apprise sur les recadrages caméra tenus à
+  l’écart **et** sur ces mêmes recadrages privés de leur bonne carte (carte absente du catalogue, a priori 20 %).
+  Règle : propositions si la meilleure a p ≥ 0,60, puis toute candidate p ≥ 0,10, 3 au plus. Moitié tenue à
+  l’écart : affichées pour 88 % des cartes du catalogue, **bonne carte parmi les propositions 98,1 %**, 1,2
+  proposition en moyenne. Porte : refus d’écrire sous 97 %.
+- **Constance** : candidate proposée sur ≥ 3 des 4 dernières images de la même carte.
+- **Concordance imprimée** : une lecture numéro/total identique deux fois qui contredit une candidate la retire ; une
+  lecture qui la confirme la place en tête (« Numéro concordant ») ; une langue prouvée exclut les autres langues.
+- **Jumelles d’illustration** de la première proposition listées avec elle (« Même illustration ») : l’image seule ne
+  peut pas les départager, l’utilisateur oui.
+- Affichage après 1,2 s d’analyse (ou dès « incertain ») : miniatures, nom, extension, numéro imprimé, langues
+  possibles, force en mots ; un appui confirme (« Confirmée par vous », prix ensuite), « Aucune de ces cartes »
+  masque les propositions pour cette carte. Aucune proposition ne montre de prix.
+- **Apprentissage sur l’appareil** (`lens/ScanMemory.js`) : une proposition confirmée mémorise le descripteur 128-d du
+  scan (pas l’image), 400 au plus, sur l’appareil uniquement ; un scan très proche (cosinus ≥ 0,92) remet cette carte
+  en tête des propositions (« Déjà confirmée par vous »). La mémoire n’alimente jamais l’identification automatique.

@@ -31,7 +31,7 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
     name: identity.name || c.name || t('Carte'),
     setName: identity.setName || c.set?.name || c.set?.id || t('Extension inconnue'),
     // Printed form: the total is zero-padded like the number ("001/084").
-    number: total ? `${number}/${/^\d+$/.test(number) ? String(total).padStart(number.length, '0') : total}` : number,
+    number: identity.printedNumber || (total ? `${number}/${/^\d+$/.test(number) ? String(total).padStart(number.length, '0') : total}` : number),
     // Language only when proven; otherwise say so (FR and EN share the printing).
     language: identity.languageUnverified
       ? (identity.languageCandidates?.length > 1 ? `${identity.languageCandidates.map(l => l.toUpperCase()).join('/')} ?` : t('Langue ?'))
@@ -48,7 +48,7 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
 }
 
 export class MarketOverlay {
-  constructor(root, { onOpen = null, onDismiss = null, onCollect = null } = {}) { this.root = root; this.onOpen = onOpen; this.onDismiss = onDismiss; this.onCollect = onCollect; this.current = null; this.seq = 0; }
+  constructor(root, { onOpen = null, onDismiss = null, onCollect = null, onConfirm = null, onReject = null } = {}) { this.root = root; this.onOpen = onOpen; this.onDismiss = onDismiss; this.onCollect = onCollect; this.onConfirm = onConfirm; this.onReject = onReject; this.current = null; this.seq = 0; }
 
   clear() { this.seq++; this.current = null; if (this.root) { this.root.hidden = true; this.root.innerHTML = ''; this.root.classList.remove('is-dim'); } }
 
@@ -64,8 +64,9 @@ export class MarketOverlay {
     this._paint(lockedSheetModel(identity, null, confidence), identity);
     let card = null;
     try {
-      const langs = (identity.languageCandidates || []).join(',');
-      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || identity.languageCandidates?.[0] || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}&market=${uiLang() === 'en' ? 'us' : 'eu'}`);
+      const cl = identity.languageCandidates || [];
+      const langs = [...cl].sort((a, b) => (b === uiLang()) - (a === uiLang())).join(',');
+      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || (cl.includes(uiLang()) ? uiLang() : cl[0]) || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}&market=${uiLang() === 'en' ? 'us' : 'eu'}`);
       if (response.ok) card = await response.json();
     } catch {}
     if (seq !== this.seq) return; // a newer card (or a clear) happened meanwhile
@@ -79,6 +80,7 @@ export class MarketOverlay {
     this.root.classList.remove('is-dim');
     // v0.3.7: three short lines over the live camera — name + price, set · number · language, trend.
     const meta = [m.setName, m.number, m.language, m.variant].filter(Boolean).map(esc).join(' · ');
+    const confirmedNote = identity?.userConfirmed ? `<span class="sheet-confirmed">${esc(t('Confirmée par vous'))}</span>` : '';
     const signals = [
       m.trend ? `${m.trend.arrow} ${esc(m.trend.text)}` : null,
       m.heat ? `Heat ${m.heat.score}${m.heat.beta ? ' β' : ''}` : null,
@@ -92,7 +94,7 @@ export class MarketOverlay {
         <button class="sheet-add" type="button" aria-label="${esc(t('Ajouter {name} à la collection', { name: m.name }))}">＋</button>
         <button class="sheet-main" type="button" aria-label="${esc(t('Ouvrir la fiche de {name}', { name: m.name }))}">
           <span class="sheet-row"><span class="sheet-name">${esc(m.name)}</span>${price}</span>
-          <span class="sheet-meta">${meta}</span>
+          <span class="sheet-meta">${meta}</span>${confirmedNote}
           ${signals ? `<span class="sheet-signal">${signals}</span>` : ''}
         </button>
       </div>`;
@@ -120,6 +122,34 @@ export class MarketOverlay {
       x0 = y0 = null;
       if (dy > 60 || Math.abs(dx) > 90) this.dismiss(); else { sheet.style.transform = ''; sheet.style.opacity = ''; }
     });
+  }
+
+  /**
+   * v0.4.1 — proposals (nothing identified yet): up to 3 printings with their picture so the user can compare,
+   * strength in plain words, tap = confirm, "None of these" = reject. Never shows a price (not identified).
+   */
+  showProposals(items) {
+    if (!this.root || !items?.length) return;
+    this.seq++; this.current = null; this.lastCard = null;
+    this.root.hidden = false; this.root.classList.remove('is-dim');
+    const label = x => x.numberMatch ? t('Numéro concordant') : x.remembered ? t('Déjà confirmée par vous') : x.twin ? t('Même illustration') : x.p >= 0.85 ? t('Très probable') : t('Probable');
+    const num = x => { const n = x.printedNumber || (x.printedTotal ? `${x.localId}/${/^\d+$/.test(String(x.localId)) ? String(x.printedTotal).padStart(String(x.localId).length, '0') : x.printedTotal}` : x.localId); return n || ''; };
+    const langs = x => (x.languages?.length > 1 ? `${x.languages.map(l => l.toUpperCase()).join('/')} ?` : (x.languages?.[0] || x.lang || '').toUpperCase());
+    this.root.innerHTML = `
+      <div class="sheet lite proposals" role="group" aria-label="${esc(t('Est-ce cette carte ?'))}">
+        <span class="sheet-grab" aria-hidden="true"></span>
+        <span class="prop-title">${esc(t('Est-ce cette carte ?'))}</span>
+        <ul class="prop-list">${items.map((x, i) => `
+          <li><button type="button" class="prop-item${x.numberMatch ? ' is-number' : ''}" data-i="${i}">
+            ${x.image ? `<img src="${esc(x.image)}" alt="" loading="lazy" decoding="async">` : '<span class="prop-noimg"></span>'}
+            <span class="prop-text"><b>${esc(x.name)}</b><small>${esc([x.setName || x.setId, num(x), langs(x)].filter(Boolean).join(' · '))}</small></span>
+            <span class="prop-p p-${x.numberMatch ? 'number' : x.p >= 0.85 ? 'high' : 'good'}">${esc(label(x))}</span>
+          </button></li>`).join('')}
+        </ul>
+        <button type="button" class="prop-none">${esc(t('Aucune de ces cartes'))}</button>
+      </div>`;
+    this.root.querySelectorAll('.prop-item').forEach(b => b.addEventListener('click', () => { const x = items[Number(b.dataset.i)]; if (x) this.onConfirm?.(x.id); }));
+    this.root.querySelector('.prop-none').addEventListener('click', () => this.onReject?.());
   }
 
   /** Collection entry for the identified printing (language stays unproven if it is). */

@@ -21,7 +21,7 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 98/98,
+Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 102/102,
 benchmark 19/19 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
@@ -41,6 +41,7 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
 - Instant visual locks are allowed only for twin-free candidates on the calibrated scale (`CALIBRATED_POLICY`);
   artwork twins always need printed evidence. Language is never guessed: shown unverified, proven in background,
   and a contradicting read withdraws the lock.
+- Rerun `tools/deep/calibrate-proposals.py` after every `train-and-export.py` (gate: right card among shown proposals ≥ 97 %).
 - Instant thresholds and the Latin/Japanese script gap come from `deep-index.json` (written by the training
   script's calibration); never hard-code new ones in the app. Twins printing the same number/total stay AMBIGUOUS.
 - TCGplayer fills TCGdex gaps only through `tcgplayer-gap-import.ts` (provenance `BOOTSTRAP_TCGPLAYER_GAP`,
@@ -56,7 +57,7 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
 - All user-facing scanner text comes from `lens/LensHud.js` (`describeHud`): plain French source strings, actionable, never machine state names. Every visible string must exist in `/i18n.js` (English written for English-speaking collectors, not word for word); `test/lens-i18n.test.js` enforces it.
 - The scanner status is a traffic light (red/orange/green); text only when the user must act or taps it. Messages hold ≥ 700 ms; the outline follows the tracked quad; holo outline only when LOCKED.
 - Card detection is the straight-edge rectangle search (`lens/EdgeRectDetector.js`); keep its synthetic benchmark ≥ 80 % correct and 0 detections on empty tables.
-- No Identify button, no candidate picker. The app opens directly on the live scanner; catalogue, collection,
+- No Identify button. Automatic identification never changes its rules for proposals: when nothing is identified, calibrated proposals (v0.4.1, `lens/Proposals.js`: p ≥ show from `calibration.proposals`, ≥ 3 of 4 frames, no printed contradiction, artwork twins listed together) may be shown and the user confirms one (`userConfirmed`); a proposal never shows a price and never counts as an automatic lock. User-confirmed scans feed only proposals (`lens/ScanMemory.js`, on-device descriptors, no image). The app opens directly on the live scanner; catalogue, collection,
   settings, help and card details are panels over the camera, never separate pages.
 - No language choice before scanning (v0.3.2): the precomputed visual index (`data/visual-index-*`, built by
   `tools/build-visual-index.mjs`) covers FR+EN+JA, candidates are grouped by printing family, and the physical

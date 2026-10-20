@@ -202,6 +202,10 @@ export class ANNIndex {
     const topScript = scriptOf(top.languages);
     const otherScript = hits.filter(h => twinIds.has(h.id) && scriptOf(h.languages) !== topScript);
     out[0].script = topScript;
+    // v0.4.1: full family ranking (proposal probabilities need the top 6 scores) and the query descriptor
+    // (on-device memory of user-confirmed scans).
+    out.ranked = hits.slice(0, 8).map(h => ({ id: h.id, score: h.score, languages: h.languages }));
+    out.query = q;
     out[0].scriptGap = otherScript.length ? top.score - Math.max(...otherScript.map(h => h.score)) : null;
     return out;
   }

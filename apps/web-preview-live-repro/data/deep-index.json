@@ -80,6 +80,29 @@
   "instantMargin": 0.12,
   "instantSingleFrame": 0.1347,
   "closedWrong": 0,
-  "openSetNonTwinFalse": 0
+  "openSetNonTwinFalse": 0,
+  "proposals": {
+   "features": "v1:score,gap,next,isTop,score2,gap2,margin12",
+   "k": 5,
+   "coef": [
+    2.513152,
+    -27.104957,
+    -0.602375,
+    2.566879,
+    2.418502,
+    -4.471313,
+    1.87062
+   ],
+   "intercept": -5.433061,
+   "priorOpen": 0.2,
+   "show": 0.6,
+   "include": 0.1,
+   "max": 3,
+   "heldOutCrops": 1998,
+   "shownInCatalogue": 0.8829,
+   "rightAmongShown": 0.9813,
+   "avgProposals": 1.2,
+   "shownNotInCatalogue": 0.6271
+  }
  }
 }
