@@ -7,13 +7,15 @@
  * artwork, so they must not compete for top-1/top-2 margin. The language of the physical card is
  * resolved separately from printed text (see LanguageEvidence) and is never guessed.
  */
+import { versionedFetch } from './indexVersion.js';
+
 export const INDEX_SCHEMA = 'tcg-lens-visual-index-v1';
 export const INDEX_LANGS = Object.freeze(['fr', 'en', 'ja']);
 
 export class PrecomputedIndex {
-  constructor({ base = '/data', fetchImpl = (...a) => fetch(...a) } = {}) {
+  constructor({ base = '/data', fetchImpl = null } = {}) {
     this.base = base;
-    this.fetchImpl = fetchImpl;
+    this.fetchImpl = fetchImpl || versionedFetch(base);
     this.langs = new Map();      // lang -> { meta, vec: Int8Array, dims }
     this.families = new Map();   // id -> Map(lang -> row)
     this.loading = new Map();

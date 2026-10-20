@@ -13,6 +13,12 @@
  *            (`tcgplayer_printed_number`) — e.g. Classic Collection reprints print "4/102" while TCGdex
  *            numbers them 001–030. Same-concept printings in other languages of that set (shared TCGdex
  *            card id) receive the image as reference too (same artwork).
+ * 2b. MAP JA (v0.3.8) TCGdex Japanese sets without TCGplayer products ↔ TCGplayer Japan groups with the same
+ *            set code (or a curated alias). A pair is accepted only when the collector number is unique on
+ *            both sides AND it is proven card by card: Pokémon — the TCGplayer (English) name contains the
+ *            species name of the TCGdex Pokédex number (learned from English TCGdex cards) and HP agree;
+ *            Trainer/Energy — same card category and the group passed the Pokémon check (≥ 90 %, ≥ 5 pairs).
+ *            Rule TP_GAP_JA_NUMBER_SPECIES. Images and TCGplayer Japan prices follow.
  * 3. IMAGES  Printings with a verified TCGplayer product and no TCGdex reference image get the TCGplayer
  *            image (1000 px) as REFERENCE.
  */
@@ -62,8 +68,12 @@ async function main() {
   const syncRunId = await startSyncRun(db, tcgcsvSourceId);
   try {
     await createJapaneseGaps(db, { tcgcsvSourceId, tcgplayerSourceId, venueId, syncRunId });
+    await fillEmptyJapaneseSets(db, { tcgcsvSourceId, tcgplayerSourceId, venueId, syncRunId });
     await mapUnmappedSets(db, { tcgcsvSourceId, tcgplayerSourceId, syncRunId });
+    await mapJapaneseSets(db, { tcgcsvSourceId, tcgplayerSourceId, venueId, syncRunId });
     await attachMissingImages(db, tcgplayerSourceId);
+    await shareSiblingImages(db);
+    await variantsFromTcgplayerSubtypes(db);
     await finishSyncRun(db, syncRunId, 'SUCCESS', { gapImport: stats });
     console.log(JSON.stringify(stats, null, 2));
   } catch (error) {
@@ -102,6 +112,13 @@ async function createJapaneseGaps(db: any, ctx: Ctx) {
        VALUES ($1,$2,'groups',$3,'ja',true) ON CONFLICT(source_id,namespace,scope_language_code,external_value) DO NOTHING`,
       [setId, ctx.tcgplayerSourceId, String(group.groupId)]);
     stats.setsCreated++;
+    await fillSetFromGroup(db, ctx, setId, code, group, products);
+    stats.prices += await prices(db, ctx, TCGCSV_POKEMON_JAPAN_CATEGORY, group.groupId);
+  }
+}
+
+/** Printings, product ids and reference images of a Japanese set from its TCGplayer Japan group. */
+async function fillSetFromGroup(db: any, ctx: Ctx, setId: string, code: string, group: TcgcsvGroup, products: TcgcsvProduct[]) {
     const seen = new Map<string, number>();
     for (const product of products) {
       const normalized = normalizeTcgcsvProduct(group as TcgcsvGroup, product);
@@ -125,8 +142,40 @@ async function createJapaneseGaps(db: any, ctx: Ctx) {
       await linkProduct(db, ctx, entityId, product.productId, 'ja', sourceRecordId, 'TP_GAP_CREATED');
       await attachImage(db, ctx.tcgplayerSourceId, entityId, product.productId, sourceRecordId);
     }
+}
+
+/**
+ * 1b. FILL (v0.3.8) Japanese sets TCGdex lists without any card: printings from the TCGplayer Japan group with
+ *     the same set code — only when that code names exactly one group, released within 30 days of the set,
+ *     and the printed total agrees with the set's official count when TCGdex gives one.
+ */
+async function fillEmptyJapaneseSets(db: any, ctx: Ctx) {
+  const sets = (await db.query(
+    `SELECT cs.entity_id, cs.official_set_code, cs.official_name, cs.release_date, cs.printed_card_count FROM card_sets cs
+      WHERE cs.language_code='ja' AND NOT EXISTS (SELECT 1 FROM card_printings cp WHERE cp.set_id=cs.entity_id)`)).rows;
+  const groups = await tcgcsv.listGroups(TCGCSV_POKEMON_JAPAN_CATEGORY);
+  const fill = { filled: 0, skipped: [] as string[] };
+  for (const set of sets) {
+    const code = String(set.official_set_code || '');
+    const cands = groups.filter(g => g.abbreviation && String(g.abbreviation).toLowerCase() === code.toLowerCase());
+    if (cands.length !== 1) { if (cands.length) fill.skipped.push(`${code}: ${cands.length} groups`); continue; }
+    const group = cands[0];
+    const days = Math.abs(new Date(String(group.publishedOn)).getTime() - new Date(set.release_date).getTime()) / 864e5;
+    if (!(days <= 30)) { fill.skipped.push(`${code}: release ${Math.round(days)} days apart`); continue; }
+    const products = (await tcgcsv.listProducts(TCGCSV_POKEMON_JAPAN_CATEGORY, group.groupId)).filter(p => number(p));
+    if (products.length < 5) { fill.skipped.push(`${code}: ${products.length} numbered products`); continue; }
+    const printedTotal = mode(products.map(p => Number(number(p)!.split('/')[1])).filter(Number.isFinite));
+    if (set.printed_card_count && printedTotal && Number(set.printed_card_count) !== printedTotal) { fill.skipped.push(`${code}: total ${printedTotal} vs ${set.printed_card_count}`); continue; }
+    if (dryRun) { console.log('would fill', code, group.name, products.length); fill.filled++; continue; }
+    await db.query(
+      `INSERT INTO external_identifiers(entity_id,source_id,namespace,external_value,scope_language_code,verified)
+       VALUES ($1,$2,'groups',$3,'ja',true) ON CONFLICT(source_id,namespace,scope_language_code,external_value) DO NOTHING`,
+      [set.entity_id, ctx.tcgplayerSourceId, String(group.groupId)]);
+    await fillSetFromGroup(db, ctx, set.entity_id, code, group as TcgcsvGroup, products);
     stats.prices += await prices(db, ctx, TCGCSV_POKEMON_JAPAN_CATEGORY, group.groupId);
+    fill.filled++;
   }
+  (stats as any).filledJapaneseSets = fill;
 }
 
 async function mapUnmappedSets(db: any, ctx: Ctx) {
@@ -190,6 +239,111 @@ async function mapUnmappedSets(db: any, ctx: Ctx) {
   }
 }
 
+/** TCGdex JA set code → TCGplayer Japan group names, for groups published without an abbreviation. */
+export const JA_GROUP_ALIASES: Record<string, string[]> = {
+  MC: ['Start Deck 100 Battle Collection'],
+  PCG1: ['Flight of Legends'], PCG2: ['Clash of the Blue Sky'], PCG3: ['Rocket Gang Strikes Back'], PCG4: ['Golden Sky, Silvery Ocean'],
+  PCG5: ['Mirage Forest'], PCG6: ['Holon Research Tower'], PCG7: ['Holon Phantom'], PCG8: ['Miracle Crystal'], PCG9: ['Offense and Defense of the Furthest Ends'],
+  E1: ['Base Expansion Pack'], E2: ['The Town on No Map'], E3: ['Wind from the Sea'], E4: ['Split Earth'], E5: ['Mysterious Mountains'],
+  VS1: ['Pokemon VS'], web1: ['Pokemon Web'],
+};
+
+const tokenSet = (s: string) => new Set(normalizeTextV1(String(s).normalize('NFD').replace(/\p{M}+/gu, '').replace(/♀/g, 'f').replace(/♂/g, 'm')).replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter(Boolean));
+
+/** Pokédex number → tokens shared by ≥ 60 % of English TCGdex card names of that species ("mr", "mime"). */
+async function speciesTokens(db: any): Promise<Map<number, Set<string>>> {
+  const rows = (await db.query(
+    `SELECT (raw_payload->'dexId'->>0)::int AS dex, raw_payload->>'name' AS name FROM source_records sr JOIN data_sources d ON d.source_id=sr.source_id
+      WHERE d.source_code='tcgdex' AND sr.namespace='cards' AND sr.scope_language_code='en' AND jsonb_array_length(COALESCE(raw_payload->'dexId','[]'::jsonb))=1`)).rows;
+  const by = new Map<number, string[]>();
+  for (const r of rows) by.set(r.dex, [...(by.get(r.dex) ?? []), r.name]);
+  const out = new Map<number, Set<string>>();
+  for (const [dex, names] of by) {
+    const c = new Map<string, number>();
+    for (const n of names) for (const t of tokenSet(n)) c.set(t, (c.get(t) ?? 0) + 1);
+    const keep = new Set([...c].filter(([, k]) => k / names.length >= 0.6).map(([t]) => t));
+    if (keep.size) out.set(dex, keep);
+  }
+  return out;
+}
+
+export type JaPairCheck = 'POKEMON_OK' | 'TRAINER_OK' | 'REJECT' | 'UNPROVEN';
+/** Card-level proof that a TCGdex JA card and a TCGplayer Japan product are the same printing. */
+export function checkJaPair(card: any, product: TcgcsvProduct, species: Map<number, Set<string>>): JaPairCheck {
+  const ext = (k: string) => product.extendedData?.find(e => e.name === k)?.value?.trim();
+  const pTokens = tokenSet(cleanCardName(product));
+  const dex: number[] = Array.isArray(card?.dexId) ? card.dexId : [];
+  const isPokemon = String(card?.category || '').toLowerCase() === 'pokemon';
+  if (isPokemon) {
+    const hp = Number(ext('HP')), chp = Number(card?.hp);
+    if (Number.isFinite(hp) && hp > 0 && Number.isFinite(chp) && chp > 0 && hp !== chp) return 'REJECT';
+    if (!dex.length) return 'UNPROVEN';
+    const known = dex.map(d => species.get(d)).filter(Boolean) as Set<string>[];
+    if (known.length < dex.length) return 'UNPROVEN';
+    return known.every(sp => [...sp].some(t => pTokens.has(t))) ? 'POKEMON_OK' : 'REJECT';
+  }
+  // Trainer / Energy: TCGplayer must not describe a Pokémon (no HP, no Stage).
+  if (ext('HP') || ext('Stage')) return 'REJECT';
+  return 'TRAINER_OK';
+}
+
+async function mapJapaneseSets(db: any, ctx: Ctx) {
+  const species = await speciesTokens(db);
+  const sets = (await db.query(
+    `SELECT cs.entity_id, cs.official_name, cs.official_set_code FROM card_sets cs
+      WHERE cs.language_code='ja' AND EXISTS (SELECT 1 FROM card_printings cp WHERE cp.set_id=cs.entity_id)
+        AND NOT EXISTS (SELECT 1 FROM card_printings cp JOIN external_identifiers e ON e.entity_id=cp.entity_id
+                         WHERE cp.set_id=cs.entity_id AND e.source_id=$1 AND e.namespace='products')`, [ctx.tcgplayerSourceId])).rows;
+  const groups = await tcgcsv.listGroups(TCGCSV_POKEMON_JAPAN_CATEGORY);
+  const jaStats = { sets: 0, setsMapped: 0, pairs: 0, rejected: 0, unproven: 0, groupsRejected: [] as string[] };
+  for (const set of sets) {
+    const code = String(set.official_set_code || '');
+    const aliases = JA_GROUP_ALIASES[code] ?? [];
+    const cands = groups.filter(g => (g.abbreviation && String(g.abbreviation).toLowerCase() === code.toLowerCase()) || aliases.includes(String(g.name)));
+    if (!cands.length) continue;
+    jaStats.sets++;
+    const printings = (await db.query(
+      `SELECT cp.entity_id, cp.collector_number_raw, sr.raw_payload AS card
+         FROM card_printings cp
+         LEFT JOIN external_identifiers e ON e.entity_id=cp.entity_id AND e.namespace='cards'
+         LEFT JOIN data_sources d ON d.source_id=e.source_id AND d.source_code='tcgdex'
+         LEFT JOIN source_records sr ON sr.source_id=d.source_id AND sr.namespace='cards' AND sr.scope_language_code='ja' AND sr.external_key=e.external_value
+        WHERE cp.set_id=$1`, [set.entity_id])).rows.filter((r: any) => r.card);
+    const numCount = new Map<string, number>();
+    for (const pr of printings) { const k = collectorNumberMatchKeyV1(pr.collector_number_raw); numCount.set(k, (numCount.get(k) ?? 0) + 1); }
+    for (const group of cands) {
+      const products = (await tcgcsv.listProducts(TCGCSV_POKEMON_JAPAN_CATEGORY, group.groupId)).filter(p => number(p));
+      const byNum = new Map<string, TcgcsvProduct[]>();
+      for (const p of products) { const k = collectorNumberMatchKeyV1(String(number(p)).split('/')[0]); byNum.set(k, [...(byNum.get(k) ?? []), p]); }
+      const pairs = printings.map((pr: any) => {
+        const k = collectorNumberMatchKeyV1(pr.collector_number_raw); const hits = byNum.get(k) ?? [];
+        if (numCount.get(k) !== 1 || hits.length !== 1) return null;
+        return { pr, product: hits[0], check: checkJaPair(pr.card, hits[0], species) };
+      }).filter(Boolean) as Array<{ pr: any; product: TcgcsvProduct; check: JaPairCheck }>;
+      const poke = pairs.filter(x => x.check === 'POKEMON_OK' || x.check === 'REJECT');
+      const ok = pairs.filter(x => x.check === 'POKEMON_OK').length;
+      const rate = poke.length ? ok / poke.length : 0;
+      if (poke.length < 5 || rate < 0.9) { jaStats.groupsRejected.push(`${code}↔${group.name}: ${ok}/${poke.length}`); continue; }
+      jaStats.setsMapped++;
+      for (const { pr, product, check } of pairs) {
+        if (check === 'REJECT') { jaStats.rejected++; if (dryRun) console.log('reject', code, pr.collector_number_raw, pr.card?.name, pr.card?.hp, '↔', product.name); continue; }
+        if (check === 'UNPROVEN') { jaStats.unproven++; continue; }
+        if (dryRun) { jaStats.pairs++; if (process.env.SHOW_PAIRS && Math.random() < 0.004) console.log('pair', code, pr.collector_number_raw, pr.card?.name, '↔', product.name); continue; }
+        const normalized = normalizeTcgcsvProduct(group as TcgcsvGroup, product);
+        const sourceRecordId = await upsertSourceRecord(db, {
+          sourceId: ctx.tcgcsvSourceId, syncRunId: ctx.syncRunId, namespace: 'products', externalKey: String(product.productId),
+          scopeLanguageCode: 'ja', rawPayload: product, normalizedPayload: normalized, normalizationVersion: 'tcgplayer-gap-v1',
+        });
+        await linkProduct(db, ctx, pr.entity_id, product.productId, 'ja', sourceRecordId, 'TP_GAP_JA_NUMBER_SPECIES');
+        await attachImage(db, ctx.tcgplayerSourceId, pr.entity_id, product.productId, sourceRecordId);
+        jaStats.pairs++; stats.mapped++;
+      }
+      if (!dryRun) stats.prices += await prices(db, ctx, TCGCSV_POKEMON_JAPAN_CATEGORY, group.groupId);
+    }
+  }
+  (stats as any).japanese = jaStats;
+}
+
 async function attachMissingImages(db: any, tcgplayerSourceId: string) {
   const rows = (await db.query(
     `SELECT e.entity_id, e.external_value, e.source_record_id FROM external_identifiers e
@@ -198,6 +352,77 @@ async function attachMissingImages(db: any, tcgplayerSourceId: string) {
         AND NOT EXISTS (SELECT 1 FROM entity_images ei WHERE ei.entity_id=e.entity_id AND ei.role='REFERENCE')`,
     [tcgplayerSourceId])).rows;
   for (const r of rows) if (!dryRun) await attachImage(db, tcgplayerSourceId, r.entity_id, r.external_value, r.source_record_id);
+}
+
+/**
+ * 4. SHARE (v0.3.8) A physical printing with no reference image borrows the reference image of a printing of the
+ *    same TCGdex card in another language (TCGdex shares card ids across FR/EN: same artwork). Only images whose
+ *    probe did not fail. The printed language is never inferred from the image (LanguageEvidence decides).
+ */
+async function shareSiblingImages(db: any) {
+  if (dryRun) return;
+  const r = await db.query(
+    `WITH td AS (SELECT source_id FROM data_sources WHERE source_code='tcgdex'),
+          missing AS (SELECT cp.entity_id FROM card_printings cp JOIN card_sets cs ON cs.entity_id=cp.set_id AND cs.product_medium='PHYSICAL'
+                       WHERE NOT EXISTS (SELECT 1 FROM entity_images ei WHERE ei.entity_id=cp.entity_id AND ei.role='REFERENCE')),
+          pick AS (
+            SELECT DISTINCT ON (m.entity_id) m.entity_id, ei.image_id
+              FROM missing m
+              JOIN external_identifiers e1 ON e1.entity_id=m.entity_id AND e1.namespace='cards' AND e1.source_id=(SELECT source_id FROM td)
+              JOIN external_identifiers e2 ON e2.source_id=e1.source_id AND e2.namespace='cards' AND e2.external_value=e1.external_value AND e2.entity_id<>e1.entity_id
+              JOIN entity_images ei ON ei.entity_id=e2.entity_id AND ei.role='REFERENCE'
+              JOIN image_origins io ON io.image_id=ei.image_id
+              LEFT JOIN image_probes ip ON ip.image_origin_id=io.image_origin_id
+             WHERE ip.ok IS NOT FALSE
+             ORDER BY m.entity_id, (ip.ok IS TRUE) DESC, (e2.scope_language_code='en') DESC)
+     INSERT INTO entity_images(entity_id,image_id,role,view_type,is_primary,sort_order)
+     SELECT entity_id, image_id, 'REFERENCE', 'FRONT', false, 2 FROM pick
+     ON CONFLICT(entity_id,image_id,role,view_type) DO NOTHING`);
+  (stats as any).siblingImagesShared = r.rowCount;
+}
+
+/** TCGplayer price sub-type → variant (same codes/finishes as the TCGdex variant plan). */
+export const SUBTYPE_VARIANTS: Record<string, { code: string; finish: string; edition: string | null; stamp: string | null }> = {
+  'Normal': { code: 'normal', finish: 'NON_HOLO', edition: null, stamp: null },
+  'Unlimited': { code: 'normal', finish: 'NON_HOLO', edition: null, stamp: null },
+  'Holofoil': { code: 'holo', finish: 'HOLO', edition: null, stamp: null },
+  'Unlimited Holofoil': { code: 'holo', finish: 'HOLO', edition: null, stamp: null },
+  'Reverse Holofoil': { code: 'reverse', finish: 'REVERSE_HOLO', edition: null, stamp: null },
+  '1st Edition': { code: 'normal+stamp-1st-edition', finish: 'NON_HOLO', edition: '1ST_EDITION', stamp: '1st-edition' },
+  '1st Edition Holofoil': { code: 'holo+stamp-1st-edition', finish: 'HOLO', edition: '1ST_EDITION', stamp: '1st-edition' },
+};
+
+/**
+ * 5. VARIANTS (v0.3.8) Printings created from TCGplayer (no TCGdex variant data) get their variants from the
+ *    sub-types TCGplayer actually prices for that product (Normal / Holofoil / Reverse Holofoil / 1st Edition…).
+ *    A printing without any priced sub-type gets none (not proven).
+ */
+async function variantsFromTcgplayerSubtypes(db: any) {
+  if (dryRun) return;
+  const rows = (await db.query(
+    `SELECT DISTINCT cp.entity_id AS printing_id, ce.canonical_key, sr.normalized_payload->>'subtype' AS subtype, sr.source_id
+       FROM card_printings cp
+       JOIN catalog_entities ce ON ce.entity_id=cp.entity_id AND ce.canonicalization_method='BOOTSTRAP_TCGPLAYER_GAP'
+       JOIN external_identifiers e ON e.entity_id=cp.entity_id AND e.namespace='products'
+       JOIN data_sources d ON d.source_id=e.source_id AND d.source_code='tcgplayer'
+       JOIN source_records sr ON sr.namespace='prices' AND sr.scope_language_code=e.scope_language_code
+            AND (sr.normalized_payload->>'productId')=e.external_value
+      WHERE NOT EXISTS (SELECT 1 FROM card_variants cv WHERE cv.printing_id=cp.entity_id)`)).rows;
+  let n = 0;
+  for (const r of rows) {
+    const v = SUBTYPE_VARIANTS[r.subtype]; if (!v) continue;
+    const key = `variant:${String(r.canonical_key).replace(/^card:/, '')}:${v.code}`;
+    const id = (await db.query(
+      `INSERT INTO catalog_entities(entity_type,canonical_key,resolution_state,canonicalization_method,canonical_source_id)
+       VALUES ('CARD_VARIANT',$1,'CANONICAL','BOOTSTRAP_TCGPLAYER_GAP',(SELECT source_id FROM data_sources WHERE source_code='tcgplayer'))
+       ON CONFLICT(canonical_key) DO UPDATE SET updated_at=now() RETURNING entity_id`, [key])).rows[0].entity_id;
+    const ins = await db.query(
+      `INSERT INTO card_variants(entity_id,printing_id,variant_code,finish,edition_mark,stamp,variant_fingerprint,size_code)
+       VALUES ($1,$2,$3,$4,$5,$6,encode(sha256(convert_to('variant-v1|' || $3::text,'UTF8')),'hex'),'STANDARD')
+       ON CONFLICT DO NOTHING RETURNING entity_id`, [id, r.printing_id, v.code, v.finish, v.edition, v.stamp]);
+    if (ins.rows[0]) n++;
+  }
+  (stats as any).variantsFromSubtypes = n;
 }
 
 async function linkProduct(db: any, ctx: Ctx, entityId: string, productId: number, lang: string, sourceRecordId: string, rule: string) {

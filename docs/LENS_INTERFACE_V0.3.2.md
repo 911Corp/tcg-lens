@@ -200,3 +200,37 @@ FCIR 0.
 - **Disparition automatique** : une fois la carte identifiée, la re-vérification visuelle continue toutes les 350 ms. Si la carte verrouillée (ou un jumeau du même groupe) sort des 3 meilleures correspondances deux fois de suite (`presenceMissVotes`), le verrou est libéré (`LOCK_RELEASED card_left_image`), la fiche disparaît et le scan reprend (feu rouge/orange). Mesuré en E2E : ≈ 1,7 s après le retrait de la carte.
 - **Fermeture manuelle** : bouton ✕, glissement vers le bas (> 60 px) ou sur le côté (> 90 px). L'identification est conservée (feu vert) mais la fiche ne revient pas tant que la carte reste en place ; une nouvelle carte (ou la même reposée) relance l'affichage.
 - **Fiche compacte translucide** (`.sheet.lite`) : verre dépoli ~34 %, 3 lignes — nom + prix, set · numéro · langue (`FR/EN ?` si non prouvée), tendance · Heat · source. Même geste de fermeture sur la pop-up des produits scellés ; dock, voyant et bulle d'aide plus transparents.
+
+## v0.3.8 — base japonaise, prix canoniques, index versionné
+
+**Données** (`tcgplayer-gap-import.ts`, mêmes garde-fous de provenance `BOOTSTRAP_TCGPLAYER_GAP`) :
+- *MAP JA* : les sets japonais TCGdex sans produit TCGplayer sont reliés au groupe TCGplayer Japon du même code (ou alias
+  `JA_GROUP_ALIASES`). Chaque paire est prouvée carte par carte (`checkJaPair`) : numéro unique des deux côtés, espèce
+  Pokémon (nom anglais appris des cartes TCGdex EN par numéro de Pokédex) et PV identiques ; dresseur/énergie seulement si
+  le groupe passe le contrôle Pokémon (≥ 90 %, ≥ 5 paires). 5 594 paires, 23 rejets, 29 non prouvées (écartées).
+- *FILL* : 32 sets japonais listés par TCGdex sans aucune carte (Shiny Star V, Eevee Heroes, VMAX Rising, Pokémon GO,
+  25th Anniversary, XY…) remplis depuis le groupe du même code (groupe unique, sortie à ±30 jours, total imprimé
+  concordant) : 3 096 cartes.
+- *SHARE* : une impression physique sans image emprunte l'image de référence de la même carte TCGdex dans une autre
+  langue (même illustration ; la langue reste prouvée par le texte) : 2 248 cartes FR.
+- *VARIANTS* : les impressions créées depuis TCGplayer reçoivent leurs variantes des sous-types réellement cotés
+  (Normal, Holofoil, Reverse Holofoil, 1st Edition…) : 3 381 variantes.
+- Pool reconnaissable : 43 595 → **54 265** cartes (japonais 5 619 → 14 055) ; verrou visuel seul autorisé
+  20 681 → 24 968. Les sets dont il manque encore des images restent sans verrou visuel seul (jumelle non indexée possible).
+
+**Modèle** : réentraîné (REG 0.2) avec 2 000 références japonaises supplémentaires en recadrages caméra ; seuils
+recalibrés (0.82 / 0.12), 0 erreur fermée, 0 faux verrou en ensemble ouvert. Cache d'embeddings par image
+(`$DEEP_WORK/cache`) : agrandir l'index ne recalcule que les nouvelles images. Évaluation en blocs (mémoire).
+
+**Prix** : `tools/export-card-prices.mjs` → `data/card-prices.json` (Cardmarket EUR au niveau impression, TCGplayer USD
+par finition). `/api/card` lit ces prix canoniques d'abord, TCGdex ensuite. Plusieurs finitions cotées et finition non
+prouvée → « dès … » ; prix d'une autre langue tant que la langue n'est pas prouvée → source suffixée « (EN) ». Le nom
+affiché ne change plus quand les données de marché arrivent.
+
+**Index versionné** : `tools/stamp-index-version.mjs` (lancé par `deploy-preview.sh`) écrit l'empreinte des fichiers
+d'index dans `data/index-version.json` ; chaque requête d'index porte `?v=<empreinte>` (`lens/indexVersion.js`). Après une
+mise à jour, le nouvel index est chargé dès le premier lancement et jamais mélangé avec l'ancien.
+
+Pipeline après ajout de données : `tcgplayer:gaps` → `images:probe` → `build:coverage` → `fetch-ref-images.mjs` →
+`build-visual-index.mjs` → `embed-references.mjs` (cache) → `camera-crops.mjs` → `train-and-export.py` →
+`export-card-prices.mjs` → déploiement.

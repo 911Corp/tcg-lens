@@ -12,11 +12,13 @@
  * fly: the instant-lock margin is measured against the best NON-twin family, and a candidate with
  * twins needs printed evidence (language, number) to pick the printing.
  */
+import { versionedFetch } from './indexVersion.js';
+
 export const DEEP_SCHEMA = 'tcg-lens-deep-index-v1';
 
 export class DeepIndex {
-  constructor({ base = '/data', fetchImpl = (...a) => fetch(...a) } = {}) {
-    this.base = base; this.fetchImpl = fetchImpl;
+  constructor({ base = '/data', fetchImpl = null } = {}) {
+    this.base = base; this.fetchImpl = fetchImpl || versionedFetch(base);
     this.meta = null; this.mean = null; this.M = null;
     this.langs = new Map();          // lang -> { vec: Int8Array, n, fam: Int32Array }
     this.famIds = []; this.famIndex = new Map(); this.famLangs = []; this.famRows = [];

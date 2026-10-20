@@ -1,8 +1,8 @@
 // Service worker (v9). Shell: network first (fresh code), cache fallback offline.
 // Recognition assets — calibrated index, catalogue metadata, AI model and OCR/barcode engines (all
 // versioned URLs) — are cache-first, so the scanner starts instantly from the second launch.
-const SHELL_CACHE = 'tcg-lens-shell-v11';
-const ASSET_CACHE = 'tcg-lens-assets-v2';
+const SHELL_CACHE = 'tcg-lens-shell-v12';
+const ASSET_CACHE = 'tcg-lens-assets-v3';
 const SHELL = ['/', '/index.html', '/styles.css', '/app-1.js', '/app-2.js', '/app-3.js', '/app-4.js', '/sealed.js', '/app-shell.js', '/lens/index.js', '/manifest.json', '/icon.svg',
   '/fonts/barlow-semi-condensed-latin-600-normal.woff2', '/fonts/barlow-semi-condensed-latin-700-normal.woff2', '/fonts/barlow-latin-400-normal.woff2', '/fonts/barlow-latin-500-normal.woff2'];
 const ASSET = url =>
@@ -23,7 +23,11 @@ self.addEventListener('fetch', event => {
       const hit = await cache.match(event.request);
       if (hit) return hit;
       const res = await fetch(event.request);
-      if (res.ok || res.type === 'opaque') cache.put(event.request, res.clone());
+      if (res.ok || res.type === 'opaque') {
+        cache.put(event.request, res.clone());
+        // Versioned index file (?v=…): drop the copies of older versions.
+        if (url.searchParams.has('v')) for (const old of await cache.keys()) { const o = new URL(old.url); if (o.pathname === url.pathname && o.search !== url.search) cache.delete(old); }
+      }
       return res;
     }));
     return;

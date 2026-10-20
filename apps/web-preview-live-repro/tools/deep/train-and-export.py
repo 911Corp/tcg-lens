@@ -39,13 +39,20 @@ fidx = {f: i for i, f in enumerate(files)}
 famid = {f: i for i, f in enumerate(dict.fromkeys(rows))}; F = np.array([famid[f] for f in rows]); NF = len(famid)
 feat = lambda Dp, Fa: np.concatenate([Dp * (1 - WF) ** .5, Fa * WF ** .5], 1)
 
-def crops(pre):
-    m = json.load(open(f'{WORK}/{pre}meta.json'))
-    Q = nz(np.fromfile(f'{WORK}/{pre}emb.bin', np.float32).reshape(-1, 1280)); QF = nz(np.fromfile(f'{WORK}/{pre}fast.bin', np.float32).reshape(-1, 236))
+def crops(pre, work=WORK):
+    m = json.load(open(f'{work}/{pre}meta.json'))
+    Q = nz(np.fromfile(f'{work}/{pre}emb.bin', np.float32).reshape(-1, 1280)); QF = nz(np.fromfile(f'{work}/{pre}fast.bin', np.float32).reshape(-1, 236))
     ok = np.linalg.norm(Q, axis=1) > 0.5
     return [x for x, k in zip(m, ok) if k], Q[ok], QF[ok]
 
 tm, TQ, TF = crops('t-'); qm, Q, QF = crops('q-')
+# v0.3.8: extra training crop sets (e.g. newly indexed Japanese sets), TRAIN_EXTRA=dir1,dir2.
+for extra in filter(None, os.environ.get('TRAIN_EXTRA', '').split(',')):
+    m2, Q2, F2 = crops('t-', extra); tm += m2; TQ = np.concatenate([TQ, Q2]); TF = np.concatenate([TF, F2])
+# Held-out references never serve for training (crops are linked to their reference image file).
+held_files = {m['file'] for m in qm}
+keep_t = np.array([m['file'] not in held_files for m in tm])
+tm = [m for m, k in zip(tm, keep_t) if k]; TQ, TF = TQ[keep_t], TF[keep_t]
 R0, T0, Q0 = feat(E, FA), feat(TQ, TF), feat(Q, QF)
 keep = np.array([m['file'] in fidx for m in tm])
 tm = [m for m, k in zip(tm, keep) if k]; T0 = T0[keep]
@@ -56,14 +63,23 @@ P = V / np.sqrt(w)
 Rw = (R0 - mu) @ P
 _, _, Vt = np.linalg.svd(Rw - Rw.mean(0), full_matrices=False)
 M = P @ Vt[:D].T
+if os.environ.get('USE_DEPLOYED') == '1':  # re-calibrate / re-export the deployed projection on the grown index
+    _o = json.load(open(f'{APP}/data/deep-index.json')); _f = np.frombuffer(gzip.decompress(open(f'{APP}/data/deep-model.bin.gz', 'rb').read()), np.float32)
+    mu, M = _f[:_o['inDims']].astype(np.float64), _f[_o['inDims']:].reshape(_o['inDims'], _o['dims']).astype(np.float64)
 proj = lambda X: nz((X - mu) @ M)
 R, q = proj(R0).astype(np.float32), proj(Q0)
 
 # Held-out calibration (closed set + open set, twin-aware margin).
 qf = np.array([famid[m['id']] for m in qm]); lvl = np.array([m['level'] for m in qm])
-FS = np.full((len(q), NF), -9, np.float32)
-S = q @ R.T
-for k in range(len(q)): np.maximum.at(FS[k], F, S[k])
+def family_scores(qv, Rv):
+    # Chunked (index × held-out crops would not fit in memory as one matrix).
+    out = np.full((len(qv), NF), -9, np.float32); Rv = Rv.astype(np.float32)
+    order = np.argsort(F, kind='stable'); starts = np.r_[0, np.flatnonzero(np.diff(F[order])) + 1]
+    for a in range(0, len(qv), 256):
+        Sb = qv[a:a + 256].astype(np.float32) @ Rv.T
+        out[a:a + 256] = np.maximum.reduceat(Sb[:, order], starts, axis=1)
+    return out
+FS = family_scores(q, R)
 fam_rows = {}
 for i, f in enumerate(F): fam_rows.setdefault(f, []).append(i)
 def twins(t, exclude=None):
@@ -83,8 +99,7 @@ try:
         f = np.frombuffer(gzip.decompress(open(f'{APP}/data/deep-model.bin.gz', 'rb').read()), np.float32)
         omu, oM = f[:old['inDims']], f[old['inDims']:].reshape(old['inDims'], old['dims'])
         oR, oq = nz((R0 - omu) @ oM), nz((Q0 - omu) @ oM)
-        oFS = np.full((len(oq), NF), -9, np.float32); oS = oq @ oR.T
-        for k in range(len(oq)): np.maximum.at(oFS[k], F, oS[k])
+        oFS = family_scores(oq, oR)
         ot = oFS.argmax(1) == qf
         stats['deployedModelTop1'] = {L: round(float(ot[lvl == L].mean()), 4) for L in sorted(set(lvl))}
         for sname in sorted(set(qset[focus])):

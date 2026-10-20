@@ -21,7 +21,7 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.6): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, Lens runtime/policy 83/83,
+Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 88/88,
 benchmark 19/19 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
@@ -45,6 +45,9 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
   script's calibration); never hard-code new ones in the app. Twins printing the same number/total stay AMBIGUOUS.
 - TCGplayer fills TCGdex gaps only through `tcgplayer-gap-import.ts` (provenance `BOOTSTRAP_TCGPLAYER_GAP`,
   printed numbers as assertions); the candidate pool still comes only from the canonical export.
+- Japanese TCGplayer mapping (v0.3.8) is accepted only card by card (`checkJaPair`: unique number + species + HP);
+  never map by number alone. Index files are versioned by content hash (`data/index-version.json`), so run
+  `tools/stamp-index-version.mjs` (done by `deploy-preview.sh`) after any index rebuild.
 
 ## Lens interface rules (v0.3.2)
 - All user-facing scanner text comes from `lens/LensHud.js` (`describeHud`): plain French, actionable, never machine state names.

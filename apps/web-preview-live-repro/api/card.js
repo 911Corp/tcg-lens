@@ -1,4 +1,20 @@
+import { readFile } from 'node:fs/promises';
 const LANGS = new Set(['fr','en','ja']);
+// v0.3.8: canonical prices (data/card-prices.json, tools/export-card-prices.mjs) first; live TCGdex second.
+const pricesFile = process.env.TCG_LENS_POOL_DIR ? `${process.env.TCG_LENS_POOL_DIR.replace(/\/$/, '')}/card-prices.json` : new URL('../data/card-prices.json', import.meta.url);
+let pricesP = null;
+const canonicalPrices = () => (pricesP ??= readFile(pricesFile, 'utf8').then(JSON.parse).catch(() => ({ prices: {} })));
+/** Canonical price entry → {market, cardmarket-like pricing for Heat}. TCGplayer: one sub-type → its price; several → the lowest, flagged `from`. */
+export function marketFromCanonical(entry, asOf = null) {
+  if (!entry) return null;
+  const [trend, avg1, avg7, avg30, low] = entry.cm || [];
+  const center = [trend, avg7, avg30, avg1].find(v => Number(v) > 0) ?? null;
+  if (center != null) return { market: { center, low: low ?? null, high: null, currency: 'EUR', updated: asOf, source: 'Cardmarket' }, pricing: { cardmarket: { trend, avg1, avg7, avg30, low } } };
+  const tp = Object.entries(entry.tp || {}).filter(([, v]) => Number(v) > 0);
+  if (!tp.length) return null;
+  const min = Math.min(...tp.map(([, v]) => v));
+  return { market: { center: min, low: null, high: null, currency: 'USD', updated: asOf, source: 'TCGplayer', from: tp.length > 1, subtypes: Object.fromEntries(tp) }, pricing: {} };
+}
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 function heatFromPricing(p){
   const cm=p?.cardmarket||{};
@@ -37,10 +53,21 @@ export default async function handler(req,res){
   try{
     const lang=LANGS.has(String(req.query.lang||''))?String(req.query.lang):'fr';
     const id=String(req.query.id||'').trim(); if(!id)return res.status(400).json({error:'id required'});
-    const u=`https://api.tcgdex.net/v2/${lang}/cards/${encodeURIComponent(id)}`;
-    const upstream=await fetch(u,{headers:{accept:'application/json'}}); if(!upstream.ok)return res.status(upstream.status).json({error:'not found'});
-    const c=await upstream.json(); const pricing=c.pricing||{};
-    const body={id:c.id,name:c.name,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?`${c.image}/high.webp`:null,market:marketFromPricing(pricing),heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
+    // Candidate languages (language not proven yet): canonical price of the first priced one.
+    const alts=String(req.query.langs||'').split(',').filter(l=>LANGS.has(l)&&l!==lang);
+    const store=await canonicalPrices();
+    const priceLang=[lang,...alts].find(l=>store.prices?.[`${l}:${id}`]);
+    const canon=priceLang?marketFromCanonical(store.prices[`${priceLang}:${id}`],store.asOf):null;
+    // TCGdex details (not available for printings imported from TCGplayer: their id is a canonical UUID).
+    let c=null;
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)){
+      try{const upstream=await fetch(`https://api.tcgdex.net/v2/${lang}/cards/${encodeURIComponent(id)}`,{headers:{accept:'application/json'},signal:AbortSignal.timeout(4000)}); if(upstream.ok)c=await upstream.json();}catch{}
+    }
+    if(!c&&!canon)return res.status(404).json({error:'not found'});
+    c=c||{id};
+    const pricing=canon?canon.pricing:(c.pricing||{});
+    const market=canon?canon.market:{...marketFromPricing(pricing),source:pricing.cardmarket?'Cardmarket':pricing.tcgplayer?'TCGplayer':null};
+    const body={id:c.id,name:c.name||null,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?`${c.image}/high.webp`:null,market,priceLang:canon?priceLang:lang,heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
     res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=3600'); return res.status(200).json(body);
   }catch(e){return res.status(500).json({error:String(e?.message||e)});}
 }

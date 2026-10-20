@@ -22,6 +22,7 @@ node --test .tmp-core/packages/resolution/test/resolution.test.js
 node --test .tmp-ingestion-test/packages/ingestion/test/tcgdex-bootstrap.test.js .tmp-ingestion-test/packages/ingestion/test/catalog-policy.test.js
 node --test .tmp-market-test/packages/ingestion/test/market-connectors.test.js
 node --test .tmp-sealed-test/packages/ingestion/test/sealed-barcode.test.js
+if [ -x node_modules/.bin/tsx ]; then node_modules/.bin/tsx --test apps/ingestion/test/tcgplayer-gap-ja.test.ts; else echo 'SKIPPED: tsx unavailable (TCGplayer Japan gap mapping tests)'; fi
 
 echo '[5/10] SQL migrations'
 bash scripts/check-sql.sh

@@ -9,34 +9,44 @@
  "layout": "float32 mean[inDims] then float32 M[inDims x dims] row-major; index int8 = round(normalized*127)",
  "training": {
   "method": "learned whitening (within-class covariance of simulated camera crops) + PCA",
-  "regularization": 0.15,
-  "trainCrops": 23160,
-  "heldOutCrops": 3180
+  "regularization": 0.2,
+  "trainCrops": 30318,
+  "heldOutCrops": 3993
  },
  "calibration": {
   "twinTau": 0.8,
-  "heldOutTop1_hard": 0.95,
-  "heldOutTop1_hard2": 0.9085,
-  "heldOutTop1_mild": 0.9764,
+  "heldOutTop1_hard": 0.9136,
+  "heldOutTop1_hard2": 0.8873,
+  "heldOutTop1_mild": 0.9497,
   "top1_30th": {
-   "hard": 0.968,
-   "hard2": 0.918,
+   "hard": 0.962,
+   "hard2": 0.943,
    "mild": 1.0
   },
   "top1_30th-c": {
-   "hard": 0.923,
-   "hard2": 0.885,
+   "hard": 0.846,
+   "hard2": 0.808,
    "mild": 1.0
   },
   "top1_M6a": {
-   "hard": 0.989,
-   "hard2": 0.898,
+   "hard": 0.943,
+   "hard2": 0.909,
+   "mild": 1.0
+  },
+  "top1_S4a": {
+   "hard": 0.814,
+   "hard2": 0.801,
+   "mild": 0.832
+  },
+  "top1_S6a": {
+   "hard": 0.86,
+   "hard2": 0.92,
    "mild": 1.0
   },
   "deployedModelTop1": {
-   "hard": 0.95,
-   "hard2": 0.9085,
-   "mild": 0.9764
+   "hard": 0.9159,
+   "hard2": 0.8798,
+   "mild": 0.9504
   },
   "deployed_30th": {
    "hard": 0.968,
@@ -45,20 +55,30 @@
   },
   "deployed_30th-c": {
    "hard": 0.923,
-   "hard2": 0.885,
+   "hard2": 0.846,
    "mild": 1.0
   },
   "deployed_M6a": {
-   "hard": 0.989,
-   "hard2": 0.898,
+   "hard": 0.932,
+   "hard2": 0.852,
    "mild": 1.0
   },
-  "scriptGap": 0.06,
-  "scriptGapDecided": 0.374,
-  "scriptCases": 895,
-  "instantScore": 0.86,
-  "instantMargin": 0.04,
-  "instantSingleFrame": 0.205,
+  "deployed_S4a": {
+   "hard": 0.827,
+   "hard2": 0.783,
+   "mild": 0.841
+  },
+  "deployed_S6a": {
+   "hard": 0.86,
+   "hard2": 0.86,
+   "mild": 1.0
+  },
+  "scriptGap": 0.07,
+  "scriptGapDecided": 0.363,
+  "scriptCases": 1453,
+  "instantScore": 0.82,
+  "instantMargin": 0.12,
+  "instantSingleFrame": 0.1347,
   "closedWrong": 0,
   "openSetNonTwinFalse": 0
  }

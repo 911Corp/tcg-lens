@@ -12,6 +12,13 @@ const meta = JSON.parse(await fs.readFile(`${app}/data/visual-index-${lang}.json
 const col = meta.columns.indexOf('imagePath');
 const all = meta.rows.map((r, i) => ({ i, file: r[col].replace(/^https?:\/\//, '').replace(/\//g, '_') }));
 const mine = all.filter(x => x.i % Number(parts) === Number(part));
+// v0.3.8: per-image embedding cache (same backbone + preprocessing ⇒ same vector), so growing the index
+// only embeds new reference images. Clear $DEEP_WORK/cache after any backbone/preprocessing change.
+const cacheDir = path.join(work, 'cache'); await fs.mkdir(cacheDir, { recursive: true });
+const cached = new Map();
+for (const x of mine) { try { const b = await fs.readFile(path.join(cacheDir, x.file + '.f32')); if (b.length === 1280 * 4) cached.set(x.i, new Float32Array(b.buffer, b.byteOffset, 1280).slice()); } catch {} }
+const todo = mine.filter(x => !cached.has(x.i));
+console.log(lang, part, 'cached', cached.size, 'to embed', todo.length);
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
 const page = await browser.newPage();
 await page.route('http://deep.local/**', async route => {
@@ -38,11 +45,16 @@ await page.evaluate(async () => {
 const out = new Float32Array(all.length * 1280); // full-size; only my rows are filled
 const fh = await fs.open(`${work}/emb-${lang}-${part}.bin`, 'w');
 let missing = 0; const t0 = Date.now();
-for (let k = 0; k < mine.length; k += 32) {
-  const batch = mine.slice(k, k + 32);
+for (const [i, v] of cached) out.set(v, i * 1280);
+for (let k = 0; k < todo.length; k += 32) {
+  const batch = todo.slice(k, k + 32);
   const r = await page.evaluate(f => window.embed(f), batch.map(b => b.file));
-  batch.forEach((b, j) => { if (r.missing[j]) missing++; out.set(r.data.slice(j * 1280, (j + 1) * 1280), b.i * 1280); });
-  if (k % 1024 === 0) console.log(lang, part, k, '/', mine.length, Math.round((Date.now() - t0) / 1000) + 's');
+  for (const [j, b] of batch.entries()) {
+    const v = Float32Array.from(r.data.slice(j * 1280, (j + 1) * 1280));
+    out.set(v, b.i * 1280);
+    if (r.missing[j]) missing++; else await fs.writeFile(path.join(cacheDir, b.file + '.f32'), Buffer.from(v.buffer));
+  }
+  if (k % 1024 === 0) console.log(lang, part, k, '/', todo.length, Math.round((Date.now() - t0) / 1000) + 's');
 }
 await fh.write(Buffer.from(out.buffer)); await fh.close();
 console.log('done', lang, part, mine.length, 'missing', missing, Math.round((Date.now() - t0) / 1000) + 's');

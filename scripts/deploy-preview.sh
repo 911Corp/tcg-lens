@@ -11,6 +11,7 @@ for lang in fr en ja; do
   test -s "$APP/data/candidate-pool-$lang.json" || { echo "missing candidate pool for $lang; run npm run build:coverage" >&2; exit 1; }
 done
 SCOPE_ARGS=(); if [ -n "${VERCEL_SCOPE:-}" ]; then SCOPE_ARGS=(--scope "$VERCEL_SCOPE"); fi
+node "$APP/tools/stamp-index-version.mjs"
 cd "$APP"
 rm -rf .vercel
 npx --yes vercel@64.7.0 link --yes --project "$PROJECT" --token "$VERCEL_TOKEN" "${SCOPE_ARGS[@]}" >/dev/null

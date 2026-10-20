@@ -20,10 +20,16 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
   const heat = c.heat || {};
   const number = identity.localId || c.localId || '';
   const total = identity.printedTotal ?? c.set?.cardCount?.official ?? null;
-  const price = money(market.center, market.currency || 'EUR');
+  const amount = money(market.center, market.currency || 'EUR');
+  // Several TCGplayer finishes priced and the finish not proven: lowest price, shown as "dès …".
+  const price = amount && market.from && !identity.variantProven ? `dès ${amount}` : amount;
+  const source = market.source || (market.currency === 'USD' ? 'TCGplayer' : amount ? 'Cardmarket' : null);
+  // Price of another language's printing (language not proven yet): say which one.
+  const priceLangNote = c.priceLang && (identity.languageUnverified || (identity.lang && c.priceLang !== identity.lang)) ? ` (${String(c.priceLang).toUpperCase()})` : '';
   const trend = TREND_LABELS[heat.trend] || null;
   return {
-    name: c.name || identity.name || 'Carte',
+    // The identity name stays (no flip once the market data arrives in another language).
+    name: identity.name || c.name || 'Carte',
     setName: identity.setName || c.set?.name || c.set?.id || 'Extension inconnue',
     // Printed form: the total is zero-padded like the number ("001/084").
     number: total ? `${number}/${/^\d+$/.test(number) ? String(total).padStart(number.length, '0') : total}` : number,
@@ -35,7 +41,7 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
     confidence: Math.round((confidence || 0) * 100),
     loadingMarket: card == null,
     price,
-    priceSource: market.currency === 'USD' ? 'TCGplayer' : price ? 'Cardmarket' : null,
+    priceSource: amount && source ? `${source}${priceLangNote}` : null,
     trend,
     heat: heat.score == null ? null : { label: HEAT_LABELS[heat.label] || heat.label, score: heat.score, beta: heat.beta !== false },
     supplyDemand: c.supplyDemand?.score == null ? null : c.supplyDemand.label,
@@ -59,7 +65,8 @@ export class MarketOverlay {
     this._paint(lockedSheetModel(identity, null, confidence), identity);
     let card = null;
     try {
-      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || identity.languageCandidates?.[0] || 'fr')}`);
+      const langs = (identity.languageCandidates || []).join(',');
+      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || identity.languageCandidates?.[0] || 'fr')}${langs ? `&langs=${encodeURIComponent(langs)}` : ''}`);
       if (response.ok) card = await response.json();
     } catch {}
     if (seq !== this.seq) return; // a newer card (or a clear) happened meanwhile
