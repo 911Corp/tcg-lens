@@ -30,7 +30,8 @@
     "build:coverage": "npm run coverage:build -w @tcglens/ingestion-worker --",
     "import:cardmarket:crosswalk": "npm run cardmarket:crosswalk -w @tcglens/ingestion-worker --",
     "test:v031:integration": "npm run test:v031-integration -w @tcglens/ingestion-worker",
-    "import:tcgplayer:crosswalk": "npm run tcgplayer:crosswalk -w @tcglens/ingestion-worker --"
+    "import:tcgplayer:crosswalk": "npm run tcgplayer:crosswalk -w @tcglens/ingestion-worker --",
+    "dev:lens": "node apps/web-preview-live-repro/dev-server.mjs"
   },
   "type": "module"
 }

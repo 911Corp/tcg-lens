@@ -2,105 +2,156 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<meta name="theme-color" content="#05090e" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<meta name="color-scheme" content="dark" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="description" content="Scanner de cartes Pokémon : nom, extension, numéro et prix, en direct depuis la caméra." />
 <link rel="manifest" href="/manifest.json" />
 <link rel="icon" href="/icon.svg" />
+<link rel="preload" href="/fonts/barlow-semi-condensed-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/fonts/barlow-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
 <title>TCG Lens</title>
 <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-lens" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="9" y="7.5" width="6" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15 15 5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="i-binder" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 3.5v17M12 8h4M12 11.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 11v5.5M12 7.6v.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
 <main class="app-shell" id="app">
-  <section class="screen ambient on" id="home">
-    <div class="ambient-grid" aria-hidden="true"></div>
-    <div class="home-shell">
-      <div class="brand"><div class="brandmark" aria-hidden="true"></div><b>TCG Lens</b></div>
+
+  <!-- Accueil -->
+  <section class="screen paper on" id="home" aria-label="Accueil">
+    <div class="home">
+      <header class="brand"><span class="brandmark" aria-hidden="true"></span><span>TCG Lens</span></header>
+      <div class="home-stage" aria-hidden="true">
+        <div class="specimen">
+          <span class="specimen-card"></span>
+          <span class="specimen-frame"></span>
+        </div>
+      </div>
       <div class="home-copy">
-        <div class="eyebrow">LIVE CARD INTELLIGENCE</div>
-        <h1>Point.<br />Identify.</h1>
-        <p>Une caméra, une carte, une identification fiable. Le Lens refuse de deviner quand les preuves ne suffisent pas.</p>
+        <h1>Visez une carte.<br />Le Lens la reconnaît.</h1>
+        <p>Nom, extension, numéro et prix du marché, directement sur l’image de la caméra. Quand les indices ne suffisent pas, il vous le dit au lieu de deviner.</p>
       </div>
-      <div class="stack home-actions">
+      <div class="home-lang">
+        <span id="homeLangLabel">Langue de vos cartes</span>
+        <div class="lang-switch" role="radiogroup" aria-labelledby="homeLangLabel" data-lang-switch>
+          <button type="button" role="radio" data-lang="fr">FR</button><button type="button" role="radio" data-lang="en">EN</button><button type="button" role="radio" data-lang="ja">JA</button>
+        </div>
+      </div>
+      <div class="home-actions">
         <button class="primary full" id="startBtn">Ouvrir la caméra</button>
-        <button class="secondary full" data-go="search">Catalogue</button>
+        <button class="secondary full" data-go="search">Parcourir le catalogue</button>
         <button class="ghost full" id="installBtn" style="display:none">Installer l’app</button>
+        <p class="install-hint" id="iosInstall"></p>
       </div>
-      <p class="install-hint" id="iosInstall"></p>
     </div>
   </section>
 
-  <section class="screen camera" id="lens">
+  <!-- Lens -->
+  <section class="screen camera" id="lens" aria-label="Scanner">
     <video id="camera" autoplay playsinline muted></video>
     <div class="camera-vignette" aria-hidden="true"></div>
-    <div class="camera-top">
-      <button class="round glass" data-go="home" aria-label="Fermer Lens">×</button>
-      <div class="livepill glass" id="livePill">ACQUIRING</div>
-      <button class="round glass" data-go="legend" aria-label="Informations">i</button>
-    </div>
-    <div class="track-layer" id="trackLayer" aria-hidden="true"></div>
+    <header class="camera-top">
+      <button class="icon-btn" data-go="home" aria-label="Fermer le scanner"><svg><use href="#i-close"/></svg></button>
+      <div class="lang-switch on-camera" role="radiogroup" aria-label="Langue de scan" data-lang-switch>
+        <button type="button" role="radio" data-lang="fr">FR</button><button type="button" role="radio" data-lang="en">EN</button><button type="button" role="radio" data-lang="ja">JA</button>
+      </div>
+      <button class="icon-btn" data-go="legend" aria-label="Comment lire le scanner"><svg><use href="#i-info"/></svg></button>
+      <span id="livePill" hidden></span>
+    </header>
+    <div class="track-layer" id="trackLayer" data-visible="false" aria-hidden="true"></div>
+    <div class="hud" id="lensHud"></div>
     <div class="lens-result-overlay" id="lensResultOverlay" hidden></div>
-    <div class="lens-debug glass" id="lensDebug" hidden></div>
-    <nav class="nav glass" aria-label="Navigation principale">
-      <button class="active" data-go="lens"><span>⌖</span><small>Lens</small></button>
-      <button data-go="search"><span>⌕</span><small>Catalogue</small></button>
-      <button data-go="collection"><span>◇</span><small>Collection</small></button>
-      <button data-go="settings"><span>···</span><small>Réglages</small></button>
-    </nav>
+    <div class="lens-debug" id="lensDebug" hidden></div>
   </section>
 
-  <section class="screen ambient" id="search">
-    <div class="ambient-grid" aria-hidden="true"></div>
+  <!-- Catalogue -->
+  <section class="screen paper" id="search" aria-label="Catalogue">
     <div class="content-shell">
-      <div class="topbar"><div><div class="eyebrow">Catalogue</div><h2>Recherche</h2></div><button class="round glass" data-go="lens">⌖</button></div>
-      <div class="searchbox glass"><div class="searchrow"><input id="searchInput" placeholder="Nom ou numéro de carte…" autocomplete="off" /><select id="langSelect"><option value="fr">FR</option><option value="en">EN</option><option value="ja">JP</option></select></div><div class="seg"><button class="on" data-kind="cards">Cartes</button><button data-kind="sealed">Scellés</button></div></div>
-      <div id="searchMeta" class="tiny muted">TCGdex · Cardmarket · TCGplayer</div>
-      <div id="results" class="results"><div class="collection-empty">Commence à saisir un nom ou un numéro.</div></div>
+      <header class="topbar"><h2>Catalogue</h2></header>
+      <div class="searchbox">
+        <div class="searchrow">
+          <label class="visually-hidden" for="searchInput">Rechercher</label>
+          <input id="searchInput" type="search" placeholder="Nom ou numéro, ex. 199/165" autocomplete="off" enterkeyhint="search" />
+          <label class="visually-hidden" for="langSelect">Langue</label>
+          <select id="langSelect"><option value="fr">FR</option><option value="en">EN</option><option value="ja">JA</option></select>
+        </div>
+        <div class="seg" role="tablist"><button class="on" data-kind="cards" role="tab">Cartes</button><button data-kind="sealed" role="tab">Produits scellés</button></div>
+      </div>
+      <p id="searchMeta" class="meta-line">Données TCGdex, prix Cardmarket et TCGplayer.</p>
+      <div id="results" class="results"><div class="collection-empty">Tapez au moins deux lettres ou un numéro de carte.</div></div>
     </div>
-    <nav class="nav glass"><button data-go="lens"><span>⌖</span><small>Lens</small></button><button class="active" data-go="search"><span>⌕</span><small>Catalogue</small></button><button data-go="collection"><span>◇</span><small>Collection</small></button><button data-go="settings"><span>···</span><small>Réglages</small></button></nav>
   </section>
 
-  <section class="screen ambient" id="detail"><div class="ambient-grid" aria-hidden="true"></div><button class="round glass detail-back" id="detailBack">‹</button><div class="detail-hero" id="detailHero"><div class="spinner"></div></div><div class="detail-content glass" id="detailContent"></div></section>
-
-  <section class="screen ambient" id="collection">
-    <div class="ambient-grid" aria-hidden="true"></div>
-    <div class="content-shell"><div class="topbar"><div><div class="eyebrow">Local-first</div><h2>Collection</h2></div><button class="round glass" id="clearCollection">⌫</button></div><div id="collectionBody"></div></div>
-    <nav class="nav glass"><button data-go="lens"><span>⌖</span><small>Lens</small></button><button data-go="search"><span>⌕</span><small>Catalogue</small></button><button class="active" data-go="collection"><span>◇</span><small>Collection</small></button><button data-go="settings"><span>···</span><small>Réglages</small></button></nav>
+  <!-- Fiche -->
+  <section class="screen paper" id="detail" aria-label="Fiche">
+    <button class="icon-btn detail-back" id="detailBack" aria-label="Retour"><svg><use href="#i-back"/></svg></button>
+    <div class="detail-hero" id="detailHero"><div class="spinner"></div></div>
+    <div class="detail-content" id="detailContent"></div>
   </section>
 
-  <section class="screen ambient" id="settings">
-    <div class="ambient-grid" aria-hidden="true"></div>
+  <!-- Collection -->
+  <section class="screen paper" id="collection" aria-label="Collection">
     <div class="content-shell">
-      <div class="topbar"><div><div class="eyebrow">TCG Lens</div><h2>Réglages</h2></div><button class="round glass" data-go="lens">⌖</button></div>
+      <header class="topbar"><h2>Collection</h2><button class="icon-btn" id="clearCollection" aria-label="Vider la collection"><svg><use href="#i-trash"/></svg></button></header>
+      <p class="meta-line">Enregistrée sur cet appareil uniquement.</p>
+      <div id="collectionBody"></div>
+    </div>
+  </section>
+
+  <!-- Réglages -->
+  <section class="screen paper" id="settings" aria-label="Réglages">
+    <div class="content-shell">
+      <header class="topbar"><h2>Réglages</h2></header>
       <div class="settings-list">
-        <div class="setting glass"><label>Langue de scan</label><select id="settingsLang"><option value="fr">Français</option><option value="en">English</option><option value="ja">日本語</option></select></div>
-        <div class="setting glass"><label>Caméra</label><button class="secondary full" id="restartCamera">Réactiver la caméra arrière</button></div>
-        <div class="setting glass"><label>Reconnaissance</label><div class="notice">Milestone mono-carte : détection, tracking, rectification perspective, matching visuel, OCR ciblé, fusion de preuves et consensus temporel. Un résultat incertain reste AMBIGUOUS ou UNKNOWN.</div></div>
-        <div class="setting glass"><label>Barcode local</label><div id="barcodeCount" class="muted">0 association</div><button class="ghost full" id="clearBarcodes">Effacer les associations locales</button></div>
-        <div class="setting glass"><label>PWA</label><button class="secondary full" id="settingsInstall">Installer sur l’écran d’accueil</button></div>
-        <div class="setting glass"><label>Données</label><p class="tiny muted">La caméra reste locale. Les données marché sont chargées uniquement après verrouillage d’une identité. Les volumes et stocks absents ne sont jamais inventés.</p></div>
-      </div>
-    </div>
-    <nav class="nav glass"><button data-go="lens"><span>⌖</span><small>Lens</small></button><button data-go="search"><span>⌕</span><small>Catalogue</small></button><button data-go="collection"><span>◇</span><small>Collection</small></button><button class="active" data-go="settings"><span>···</span><small>Réglages</small></button></nav>
-  </section>
-
-  <section class="screen ambient" id="legend">
-    <div class="ambient-grid" aria-hidden="true"></div>
-    <div class="content-shell"><div class="topbar"><div><div class="eyebrow">Lens</div><h2>Lecture de l’overlay</h2></div><button class="round glass" data-go="lens">×</button></div>
-      <div class="cardpanel glass">
-        <div class="legend-row"><b>LOCKED</b><div><b>Identité verrouillée</b><p>Plusieurs frames convergent avec un écart top‑1/top‑2 suffisant et aucune contradiction forte.</p></div></div>
-        <div class="legend-row"><b>AMBIGUOUS</b><div><b>Pas de choix forcé</b><p>TCG Lens continue l’analyse au lieu de proposer une liste de cartes à sélectionner.</p></div></div>
-        <div class="legend-row"><b>Heat Beta</b><div><b>Marché</b><p>Les dimensions indisponibles restent absentes. Aucun volume de vente ou stock n’est fabriqué.</p></div></div>
+        <div class="setting"><label for="settingsLang">Langue de scan</label><p>Le Lens compare la carte au catalogue de cette langue uniquement.</p><select id="settingsLang"><option value="fr">Français</option><option value="en">English</option><option value="ja">日本語</option></select></div>
+        <div class="setting"><label>Caméra</label><p>Si l’image reste noire, relancez la caméra arrière.</p><button class="secondary full" id="restartCamera">Relancer la caméra</button></div>
+        <div class="setting"><label>Fiabilité</label><p>Le Lens ne valide une carte qu’après plusieurs images concordantes et, si besoin, la lecture du numéro imprimé. Sinon il reste en « Identification incertaine » plutôt que de proposer une carte au hasard.</p></div>
+        <div class="setting"><label>Codes-barres enregistrés</label><p id="barcodeCount">0 association</p><button class="ghost full" id="clearBarcodes">Effacer les codes-barres enregistrés</button></div>
+        <div class="setting"><label>Application</label><button class="secondary full" id="settingsInstall">Ajouter à l’écran d’accueil</button></div>
+        <div class="setting"><label>Confidentialité</label><p>L’image de la caméra reste sur l’appareil. Les prix ne sont chargés qu’une fois la carte identifiée. Volumes et stocks ne sont jamais inventés : s’ils manquent, ils sont marqués « Non disponible ».</p></div>
       </div>
     </div>
   </section>
 
-  <div class="modal" id="modal"><div class="modal-card glass"><div class="topbar"><div><div class="eyebrow" id="modalEyebrow">Lens</div><h3 id="modalTitle">Résultats</h3></div><button class="round glass" id="modalClose">×</button></div><div id="modalBody"></div></div></div>
-  <div class="toast" id="toast">OK</div>
+  <!-- Aide -->
+  <section class="screen paper" id="legend" aria-label="Comment lire le scanner">
+    <div class="content-shell">
+      <header class="topbar"><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-back"/></svg></button><h2>Lire le scanner</h2></header>
+      <ol class="legend">
+        <li data-tone="work"><b>Le cadre se referme</b><p>Les coins s’allongent à mesure que les images concordent avec le catalogue.</p></li>
+        <li data-tone="attention"><b>Message ambre</b><p>Le Lens a besoin de vous : rapprochez la carte, évitez un reflet, ou rendez le numéro lisible.</p></li>
+        <li data-tone="locked"><b>Contour holographique</b><p>La carte est identifiée : nom, extension, numéro et prix s’affichent. Touchez la fiche pour le détail.</p></li>
+        <li data-tone="fail"><b>Carte non reconnue</b><p>Aucune correspondance fiable. Vérifiez la langue de scan en haut de l’écran.</p></li>
+      </ol>
+      <p class="meta-line">Le Heat (bêta) n’utilise aujourd’hui que l’évolution des prix ; les ventes et le stock ne sont pas encore disponibles.</p>
+    </div>
+  </section>
+
+  <nav class="nav" id="nav" aria-label="Navigation principale">
+    <button data-go="lens" data-nav="lens"><svg><use href="#i-lens"/></svg><span>Scanner</span></button>
+    <button data-go="search" data-nav="search"><svg><use href="#i-search"/></svg><span>Catalogue</span></button>
+    <button data-go="collection" data-nav="collection"><svg><use href="#i-binder"/></svg><span>Collection</span></button>
+    <button data-go="settings" data-nav="settings"><svg><use href="#i-gear"/></svg><span>Réglages</span></button>
+  </nav>
+
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-card"><div class="topbar"><div><p class="eyebrow" id="modalEyebrow">Lens</p><h3 id="modalTitle">Résultats</h3></div><button class="icon-btn" id="modalClose" aria-label="Fermer"><svg><use href="#i-close"/></svg></button></div><div id="modalBody"></div></div></div>
+  <div class="toast" id="toast" role="status" aria-live="polite">OK</div>
   <canvas id="capture" hidden></canvas>
 </main>
 <script src="/app-1.js"></script><script src="/app-2.js"></script><script src="/app-3.js"></script><script src="/app-4.js"></script>
+<script src="/app-shell.js"></script>
 <script type="module" src="/lens/index.js"></script>
 </body>
 </html>

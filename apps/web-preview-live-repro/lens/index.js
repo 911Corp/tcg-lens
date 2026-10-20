@@ -11,7 +11,7 @@ function ensureRuntime() {
     video: $('#camera'),
     trackLayer: $('#trackLayer'),
     resultOverlay: $('#lensResultOverlay'),
-    statusPill: $('#livePill'),
+    hudRoot: $('#lensHud'),
     debugNode: debug,
   });
   return runtime;
@@ -22,6 +22,8 @@ window.TCGLiveLens = {
   pause: () => ensureRuntime().pause(),
   resume: () => ensureRuntime().resume(),
   stop: () => runtime?.stop(),
+  setLanguage: lang => ensureRuntime().setLanguage(lang),
+  cameraError: error => ensureRuntime().showCameraError(error),
   manual: () => ensureRuntime().analyzeCurrentFrame(), // diagnostic/test only, not exposed in normal UI
   get runtime() { return runtime; },
 };
