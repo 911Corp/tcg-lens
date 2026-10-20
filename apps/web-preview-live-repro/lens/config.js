@@ -19,7 +19,7 @@ export const DEFAULT_POLICY = Object.freeze({
   ocrExactVotes: 2,
   ocrNameVotes: 2,
   ocrMaxObservations: 5,
-  barcodeIntervalMs: 700,
+  barcodeIntervalMs: 450,
   lostAfterMs: 850,
   changeGraceMs: 450,
   minStableHits: 4,
@@ -31,6 +31,11 @@ export const DEFAULT_POLICY = Object.freeze({
   // v0.3.2: with a 2-read exact printed number + total consensus on the visual top, the visual
   // score bar is lowered (camera vs catalogue scan); margin, votes and quality bars are unchanged.
   lockVisualScoreWithPrinting: 0.9,
+  // v0.3.4: printed name read twice (OCR consensus) + same visual bars as the printed-number path.
+  lockWithPrintedName: true,
+  // v0.3.4: when the card is identified but its language cannot be read, lock after this delay
+  // with the language shown as unverified (never guessed), unless a read contradicts the family.
+  languageGraceMs: 2500,
   lockVisualMargin: 0.06,
   lockMinAverageQuality: 0.46,
   visualOnlyScore: 0.965,

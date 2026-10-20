@@ -21,8 +21,8 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.3): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 75/75,
-benchmark 14/14 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
+Expected baseline (v0.3.4): resolution 4/4, ingestion 18/18, market 8/8, sealed 5/5, Lens runtime/policy 78/78,
+benchmark 15/15 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
 
@@ -45,7 +45,11 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
   language is proven from printed text (`lens/LanguageEvidence.js`, incl. Japanese script evidence). A
   multi-language family needs 2 agreeing reads; in auto mode a single-language printing needs 1 agreeing read;
   2 reads of a language the printing does not exist in block the lock. A fixed scan language stays available in
-  Réglages.
+  Réglages. If the language stays unreadable for `languageGraceMs`, the printing locks with the language shown as
+  unverified (never guessed); any foreign-language read blocks that shortcut.
+- Barcodes are read continuously and independently (native or zxing-wasm); barcode → product goes through the
+  verified registry, else a public-title CANDIDATE confirmed by the user. Sealed data comes from the canonical
+  export `data/sealed-catalog.json` (`tools/export-sealed-catalog.mjs`).
 - Run locally with `npm run dev:lens` (serves `/api/*`; needs the candidate-pool export).
 
 Do not merge a change that makes this command fail.

@@ -96,6 +96,13 @@ export class LanguageConsensus {
     return null;
   }
 
+  /** Any read of a language the family does not exist in (even a single one). */
+  outside(familyId, languages) {
+    if (!languages?.length) return false;
+    for (const [lang] of this.reads.get(familyId) || []) if (!languages.includes(lang)) return true;
+    return false;
+  }
+
   /** Proven language for a family, or null (unresolved or contradicted). */
   resolved(familyId, languages = null) {
     if (languages?.length && this.contradicted(familyId, languages)) return null;

@@ -80,6 +80,9 @@ export function describeHud(input = {}) {
   if (state === 'ERROR' || input.error) {
     return { tone: 'fail', key: 'error', title: 'Caméra indisponible', hint: input.error || 'Autorisez l’accès à la caméra dans les réglages du navigateur, puis réessayez.', progress: null, action: { id: 'retry-camera', label: 'Réessayer' } };
   }
+  if (input.cameraNeedsTap) {
+    return { tone: 'attention', key: 'camera-tap', title: 'Touchez l’écran', hint: 'Le navigateur attend un geste pour lancer la caméra (mode économie d’énergie).', progress: null };
+  }
   if (input.cameraPending) {
     return { tone: 'idle', key: 'camera-pending', title: 'Activation de la caméra', hint: 'Autorisez l’accès à la caméra si le navigateur le demande.', progress: idx ? idx.progress : null };
   }

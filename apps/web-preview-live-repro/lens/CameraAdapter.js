@@ -1,6 +1,7 @@
 export class CameraAdapter {
   constructor(video) { this.video = video; this.stream = null; }
-  async attach(stream) {
+  /** @param {() => void} [onNeedsGesture] called when the browser refuses autoplay (iOS low power mode). */
+  async attach(stream, onNeedsGesture = null) {
     this.stream = stream; this.video.srcObject = stream;
     if (this.video.readyState < 2 || !this.video.videoWidth) {
       await Promise.race([
@@ -8,7 +9,16 @@ export class CameraAdapter {
         new Promise((_, reject) => setTimeout(() => reject(new Error('camera_metadata_timeout')), 3500)),
       ]);
     }
-    await this.video.play();
+    try { await this.video.play(); }
+    catch {
+      // iOS may require a gesture to play even a muted inline camera stream: resume on the first tap
+      // anywhere instead of showing the native play button.
+      onNeedsGesture?.();
+      await new Promise(resolve => {
+        const go = () => this.video.play().then(() => { document.removeEventListener('pointerdown', go, true); resolve(); }, () => {});
+        document.addEventListener('pointerdown', go, true);
+      });
+    }
     if (!this.video.videoWidth || !this.video.videoHeight) throw new Error('camera_zero_dimension');
     return { width: this.video.videoWidth, height: this.video.videoHeight };
   }

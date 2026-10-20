@@ -31,16 +31,16 @@
 
   <!-- Lens -->
   <section class="screen camera on" id="lens" aria-label="Scanner">
-    <video id="camera" autoplay playsinline muted></video>
+    <video id="camera" autoplay playsinline muted disablepictureinpicture disableremoteplayback x-webkit-airplay="deny"></video>
     <div class="camera-vignette" aria-hidden="true"></div>
     <header class="camera-top">
-      <span class="brand on-camera" aria-label="TCG Lens"><span class="brandmark" aria-hidden="true"></span></span>
       <div class="status-light" id="lensHud"></div>
       <button class="icon-btn" data-go="legend" aria-label="Comment lire le scanner"><svg><use href="#i-info"/></svg></button>
       <span id="livePill" hidden></span>
     </header>
     <div class="track-layer" id="trackLayer" data-visible="false" aria-hidden="true"></div>
     <div class="lens-result-overlay" id="lensResultOverlay" hidden></div>
+    <div class="lens-result-overlay sealed-overlay" id="sealedOverlay" hidden></div>
     <div class="lens-debug" id="lensDebug" hidden></div>
   </section>
 
@@ -116,9 +116,9 @@
   </section>
 
   <nav class="nav" id="nav" aria-label="Navigation principale">
-    <button data-go="search" data-nav="search"><svg><use href="#i-search"/></svg><span>Catalogue</span></button>
-    <button data-go="collection" data-nav="collection"><svg><use href="#i-binder"/></svg><span>Collection</span></button>
-    <button data-go="settings" data-nav="settings"><svg><use href="#i-gear"/></svg><span>Réglages</span></button>
+    <button data-go="search" data-nav="search" aria-label="Catalogue"><svg><use href="#i-search"/></svg></button>
+    <button data-go="collection" data-nav="collection" aria-label="Collection"><svg><use href="#i-binder"/></svg></button>
+    <button data-go="settings" data-nav="settings" aria-label="Réglages"><svg><use href="#i-gear"/></svg></button>
   </nav>
 
   <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-card"><div class="topbar"><div><p class="eyebrow" id="modalEyebrow">Lens</p><h3 id="modalTitle">Résultats</h3></div><button class="icon-btn" id="modalClose" aria-label="Fermer"><svg><use href="#i-close"/></svg></button></div><div id="modalBody"></div></div></div>
@@ -126,6 +126,7 @@
   <canvas id="capture" hidden></canvas>
 </main>
 <script src="/app-1.js"></script><script src="/app-2.js"></script><script src="/app-3.js"></script><script src="/app-4.js"></script>
+<script src="/sealed.js"></script>
 <script src="/app-shell.js"></script>
 <script type="module" src="/lens/index.js"></script>
 </body>

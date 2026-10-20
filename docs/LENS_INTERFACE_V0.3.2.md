@@ -97,3 +97,31 @@ chained (600 ms), a language read with ≥ 4 distinct markers of one language an
 
 **End-to-end (headless Chromium, CPU only — not a phone):** tilted FR card on a busy table, tilted FR card on
 wood and EN card all lock on the right printing and language. Tests 75/75, benchmark 14/14, FCIR 0.
+
+## v0.3.4 — Barcodes & sealed products back, live-first screen, scans that conclude
+
+**Barcodes.** Read continuously from the live camera, independently of card recognition (native
+`BarcodeDetector` on Android, `barcode-detector@2.2.11` zxing-wasm polyfill elsewhere incl. iOS). A code is
+announced after two identical checksum-valid reads (GTIN-14). `/api/barcode`: verified registry
+(`data/barcodes.json`, exported from `entity_barcodes` VERIFIED) → VERIFIED; otherwise the product title from
+the public UPCitemdb database is matched against the canonical sealed catalogue → CANDIDATE, shown as a
+pop-up with "C’est bien ce produit" / "Autre produit"; the confirmation is remembered on the device.
+Unknown codes open the sealed search to associate them. Card analysis pauses while a product is shown and
+resumes 6 s after the box leaves the camera.
+
+**Sealed catalogue.** `tools/export-sealed-catalog.mjs` exports the 7 904 canonical sealed products (ETB,
+displays, boosters, bundles, tins, blisters, decks, collection boxes…) with Cardmarket/TCGplayer ids and
+latest prices (Cardmarket trend EUR, TCGplayer market USD) to `data/sealed-catalog.json`; Cardmarket and
+TCGplayer listings of the same product are grouped for display. `/api/sealed` searches it (no more
+download of the full Cardmarket catalogue per request).
+
+**Screen.** Native video controls hidden (iOS play/pause button); if the browser refuses autoplay (low power
+mode) a tap anywhere starts the camera. Translucent controls, icon-only dock, no brand button.
+
+**Scans conclude.**
+- Printed name read twice + visual bars (score ≥ 0.90, margin ≥ 0.06, 4 votes, quality) locks — only for
+  candidates of visually complete sets (`visualOnlyLockAllowed`), so the margin separates printings. The
+  original rule "OCR name alone cannot lock an exact printing" still holds elsewhere.
+- Language grace: identity proven but language unreadable for 2.5 s → lock with the language shown as
+  "Langue à confirmer (FR / EN)"; any read of a language the printing does not exist in still blocks.
+Tests 78/78, benchmark 15/15, FCIR 0.

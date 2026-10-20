@@ -128,3 +128,30 @@ test('digits-only collector reads are kept only when they look like a printed nu
   for (const ok of ['001/084', '0001/084', '199/165', '25/102', '230/198']) assert.equal(plausibleCollector(ok), true, ok);
   for (const bad of ['0071/0840', '2', '20', '001/0840', '000/084', '400/084', '']) assert.equal(plausibleCollector(bad), false, bad);
 });
+
+test('printed name + clear visual margin locks only in visually complete sets', () => {
+  const fusion = new EvidenceFusion();
+  const temporal = { top: { candidateId: 'x', votes: 5, avgScore: 0.92, avgMargin: 0.07, avgQuality: 0.8 } };
+  const ocr = { candidateId: 'x', collectorExact: false, strongNameMatch: true, contradiction: false };
+  const base = { candidateId: 'x', score: 0.92, margin: 0.07, embeddingVerified: true, languages: ['fr'], resolvedLang: 'fr' };
+  const locked = fusion.evaluate({ temporal, visual: { ...base, visualOnlyLockAllowed: true }, ocr });
+  assert.equal(locked.decision, 'LOCK'); assert.equal(locked.reason, 'visual_temporal_plus_printed_name');
+  assert.notEqual(fusion.evaluate({ temporal, visual: { ...base, visualOnlyLockAllowed: false }, ocr }).decision, 'LOCK', 'set not visually complete');
+  assert.notEqual(fusion.evaluate({ temporal: { top: { ...temporal.top, avgMargin: 0.04 } }, visual: { ...base, visualOnlyLockAllowed: true }, ocr }).decision, 'LOCK', 'margin bar unchanged');
+});
+
+test('unreadable language: lock after the grace delay with language unverified, never across a foreign read', () => {
+  const fusion = new EvidenceFusion();
+  const temporal = { top: { candidateId: 'x', votes: 7, avgScore: 0.98, avgMargin: 0.2, avgQuality: 0.8 } };
+  const v = { candidateId: 'x', score: 0.98, margin: 0.2, embeddingVerified: true, visualOnlyLockAllowed: true, languages: ['fr', 'en'], resolvedLang: null };
+  assert.equal(fusion.evaluate({ temporal, visual: { ...v, languageWaitMs: 1000 } }).reason, 'language_unresolved');
+  const late = fusion.evaluate({ temporal, visual: { ...v, languageWaitMs: 2600 } });
+  assert.equal(late.decision, 'LOCK'); assert.equal(late.languageUnverified, true);
+  assert.equal(fusion.evaluate({ temporal, visual: { ...v, languageWaitMs: 9000, languageOutside: true } }).decision, 'VERIFY', 'a Japanese read blocks the shortcut');
+});
+
+import { lockedSheetModel } from '../lens/MarketOverlay.js';
+test('an unverified language is shown as such, never guessed', () => {
+  const m = lockedSheetModel({ id: 'me05-001', name: 'Tropius', localId: '001', printedTotal: 84, lang: null, languageUnverified: true, languageCandidates: ['fr', 'en'] }, null, 0.95);
+  assert.equal(m.language, 'Langue à confirmer (FR / EN)');
+});

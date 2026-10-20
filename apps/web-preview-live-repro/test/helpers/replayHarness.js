@@ -86,8 +86,12 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
 
   function evaluate() {
     const temporal = context.consensus.summary();
+    const v = context.visualEvidence;
+    if (context.langWait && context.langWait.id !== v.candidateId) context.langWait = null;
+    v.languageWaitMs = context.langWait ? now - context.langWait.since : 0;
     const decision = fusion.evaluate({ temporal, visual: context.visualEvidence, ocr: context.ocrEvidence, canonical: { conflict: false } });
     events.push({ t: now, type: 'FUSION', decision, temporal: temporal.top, temporalEpoch: temporal.epoch, temporalAction: temporal.lastAction });
+    if (decision.reason === 'language_unresolved' && !context.langWait) context.langWait = { id: decision.candidateId, since: now };
     if (decision.decision === 'LOCK') lock(decision);
     else if (decision.decision === 'AMBIGUOUS') transition(LENS_STATES.AMBIGUOUS, { reason: decision.reason });
     else if (decision.decision === 'VERIFY') transition(LENS_STATES.VERIFYING, { candidateId: decision.candidateId, reason: decision.reason });
@@ -142,7 +146,8 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
     }
     const resolvedLang = languages ? context.langConsensus.resolved(id, languages) : null;
     const languageContradiction = languages ? context.langConsensus.contradicted(id, languages) : null;
-    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction };
+    const languageOutside = languages ? context.langConsensus.outside(id, languages) : false;
+    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction, languageOutside };
     const temporal = context.consensus.observe({ candidateId: id, score: row.score, margin: row.margin, quality: 0.8, at: now });
     events.push({ t: now, type: 'VISUAL', candidateId: id, score: row.score, margin: row.margin, temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction, temporalEpoch: temporal.epoch, locked: context.locked?.id || null });
     if (!context.locked && corroborateB && id === 'test-b' && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4 && now - context.lastOcrAt >= policy.ocrIntervalMs) {

@@ -71,7 +71,8 @@ export class LensRuntime {
     this.stateMachine.reset({ reason: 'camera_start' });
     this._hud(true);
     try {
-      const dimensions = await this.camera.attach(stream);
+      const dimensions = await this.camera.attach(stream, () => { this.cameraNeedsTap = true; this._hud(true); });
+      this.cameraNeedsTap = false;
       this.telemetry.emit('CAMERA_READY', dimensions);
       this.embedding.ensureModel().then(ready => this.telemetry.emit('EMBEDDING_MODEL', { ready }));
       this._loadIndex();
@@ -180,6 +181,13 @@ export class LensRuntime {
   async _tick(at) {
     if (!this.running || this.paused || !this.sampler.shouldSample(at)) return;
     if (this.video.readyState < 2 || !this.video.videoWidth) return;
+    // A sealed product is shown (barcode): keep reading barcodes, pause card analysis. When no
+    // barcode has been seen for 6 s the shell closes the product and card scanning resumes.
+    if (this.sealedMode) {
+      this._renderTrack(null); this._maybeBarcode(at); this._hud();
+      if (this.barcodeSeenAt && at - this.barcodeSeenAt > 6000) { this.barcodeSeenAt = null; document.dispatchEvent(new CustomEvent('tcglens:barcode-gone')); }
+      return;
+    }
     const d0 = performance.now();
     const detections = this.detector.detect(this.video, { angleHint: this.tracker.track?.angle ?? undefined });
     this.stats.ticks++; this.stats.detectMs = Math.round(performance.now() - d0);
@@ -307,6 +315,8 @@ export class LensRuntime {
       candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true,
       visualOnlyLockAllowed: row.visualOnlyLockAllowed === true, lockBlockedReason: row.lockBlockedReason || null,
       languages, resolvedLang, languageContradiction: c.langConsensus.contradicted(top.id, languages), quality,
+      languageOutside: c.langConsensus.outside(top.id, languages),
+      languageWaitMs: c.langWait?.id === top.id ? performance.now() - c.langWait.since : 0,
     };
   }
 
@@ -386,7 +396,14 @@ export class LensRuntime {
     const c = this.context; if (!c || !c.visualEvidence || c.locked) return;
     const temporal = c.consensus.summary();
     const canonical = this.resolver.resolve({ visualCandidates: c.visualCandidates, ocr: c.ocrEvidence });
-    const decision = this.fusion.evaluate({ temporal, visual: c.visualEvidence, ocr: c.ocrEvidence, canonical });
+    if (c.langWait && c.langWait.id !== c.visualEvidence.candidateId) c.langWait = null;
+    if (c.langWait) c.visualEvidence.languageWaitMs = performance.now() - c.langWait.since;
+    let decision = this.fusion.evaluate({ temporal, visual: c.visualEvidence, ocr: c.ocrEvidence, canonical });
+    if (decision.reason === 'language_unresolved' && !c.langWait) {
+      c.langWait = { id: decision.candidateId, since: performance.now() };
+      // Re-check when the grace delay expires even if no new frame evidence arrives.
+      setTimeout(() => { if (this.context === c && !c.locked) this._evaluateEvidence(); }, (this.policy.languageGraceMs ?? 2500) + 50);
+    }
     this.telemetry.emit('FUSION', decision);
     c.lastDecision = decision;
     if (decision.decision === 'LOCK') this._lock(decision, canonical.candidate || c.visualCandidates[0]);
@@ -407,8 +424,11 @@ export class LensRuntime {
     const resolved = c.visualEvidence?.candidateId === candidate.id ? c.visualEvidence.resolvedLang : null;
     const row = (resolved && candidate.byLang?.[resolved]) || (candidate.languages?.length === 1 && candidate.byLang?.[candidate.languages[0]]) || candidate;
     const { byLang, languages, ...printing } = row;
-    const identity = { ...printing, lang: printing.lang || (this.lang === 'auto' ? null : this.lang) };
+    const identity = decision.languageUnverified
+      ? { ...printing, lang: null, languageUnverified: true, languageCandidates: candidate.languages || [printing.lang].filter(Boolean) }
+      : { ...printing, lang: printing.lang || (this.lang === 'auto' ? null : this.lang) };
     c.locked = { id: candidate.id, confidence: decision.confidence, identity };
+    document.dispatchEvent(new CustomEvent('tcglens:card-locked', { detail: identity }));
     this.marketOverlay.showLocked(identity, decision.confidence);
     this._renderTrack(this.tracker.track);
     this._hud(true);
@@ -452,34 +472,27 @@ export class LensRuntime {
     }
   }
 
+  /**
+   * Barcodes (sealed products: ETB, displays, boosters…) are read continuously and independently of
+   * card recognition. A code is announced once two consecutive reads agree (checksum-valid GTIN);
+   * the shell resolves it to a product. The same code is not re-announced for 12 s.
+   */
   _maybeBarcode(at) {
     if (this.barcodeInFlight || at - this.lastBarcodeAt < this.policy.barcodeIntervalMs) return;
     this.lastBarcodeAt = at; this.barcodeInFlight = true;
-    const token = this._trackToken();
     this.barcode.detect(this.video).then(result => {
-      if (!result) return;
-      if (!this._isTrackTokenCurrent(token)) {
-        this.telemetry.emit('BARCODE_STALE_DISCARDED', { launchedFor: token, current: this._trackToken(), code: result.code });
-        return;
-      }
-      this.telemetry.emit('BARCODE', { code: result.code, verified: result.verified });
-      if (result.verified && result.match && this.context && !this.context.locked) {
-        if (!this.tracker.track?.stable) {
-          this.telemetry.emit('BARCODE_LOCK_DEFERRED', { reason: 'track_not_stable', candidateId: result.candidateId });
-          return;
-        }
-        if ([LENS_STATES.TRACKING, LENS_STATES.UNKNOWN, LENS_STATES.AMBIGUOUS].includes(this.stateMachine.state)) {
-          if (!this._safeTransition(LENS_STATES.ANALYZING, { reason: 'verified_barcode' })) return;
-        }
-        if (this.stateMachine.state === LENS_STATES.ANALYZING) {
-          if (!this._safeTransition(LENS_STATES.VERIFYING, { candidateId: result.candidateId, reason: 'verified_barcode' })) return;
-        }
-        if (this.stateMachine.state !== LENS_STATES.VERIFYING) {
-          this.telemetry.emit('BARCODE_LOCK_REJECTED_STATE', { state: this.stateMachine.state, candidateId: result.candidateId });
-          return;
-        }
-        this._lock({ candidateId: result.candidateId, confidence: 0.995, reason: 'verified_barcode' }, { ...result.match, id: result.candidateId });
-      }
+      this.stats.barcode = this.barcode.kind || '-';
+      if (!result) { this.barcodeLast = null; return; }
+      this.barcodeSeenAt = at;
+      const prev = this.barcodeLast;
+      this.barcodeLast = { gtin14: result.gtin14, at };
+      if (!prev || prev.gtin14 !== result.gtin14 || at - prev.at > 2500) return;
+      const announced = this.barcodeAnnounced;
+      if (announced && announced.gtin14 === result.gtin14 && at - announced.at < 12000) return;
+      this.barcodeAnnounced = { gtin14: result.gtin14, at };
+      this.stats.lastBarcode = result.code;
+      this.telemetry.emit('BARCODE', { code: result.code, gtin14: result.gtin14, format: result.format });
+      document.dispatchEvent(new CustomEvent('tcglens:barcode', { detail: result }));
     }).finally(() => { this.barcodeInFlight = false; });
   }
 
@@ -525,10 +538,12 @@ export class LensRuntime {
     const temporal = c?.consensus?.summary?.();
     const verifying = c && !c.locked && (this.stateMachine.state === LENS_STATES.VERIFYING || c.lastDecision?.decision === 'VERIFY');
     if (c) c.verifySince = verifying ? (c.verifySince ?? at) : null;
+    if (this.sealedMode) { this.hud.render({ tone: 'locked', key: 'sealed', title: 'Produit reconnu par code-barres', hint: null, progress: 1 }); return; }
     const model = describeHud({
       verifyingMs: c?.verifySince != null ? at - c.verifySince : 0,
       state: this.cameraError ? 'ERROR' : this.stateMachine.state,
       cameraPending: Boolean(this.cameraPending),
+      cameraNeedsTap: Boolean(this.cameraNeedsTap),
       error: this.cameraError,
       decision: c?.lastDecision || null,
       quality: c?.lastQuality || null,
@@ -623,6 +638,7 @@ export class LensRuntime {
       `suivi ${tr ? `${tr.hits} hits${tr.stable ? ' stable' : ''}` : 'aucune carte'} · qualité ${Math.round((c?.lastQuality?.score || 0) * 100)}`,
       `visuel ${st.queries} req · ${st.queryMs} ms · ${st.top || '-'}`,
       `OCR ${st.ocr} · ${st.ocrMs} ms · langue ${st.lang || '-'}`,
+      `codes-barres ${st.barcode || '-'}${st.lastBarcode ? ` · dernier ${st.lastBarcode}` : ''}`,
       `décision ${c?.lastDecision ? `${c.lastDecision.decision} ${c.lastDecision.reason}` : '-'}`,
       `dernier évènement ${event.type}`,
     ];

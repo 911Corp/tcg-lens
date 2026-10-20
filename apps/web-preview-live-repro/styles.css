@@ -298,3 +298,37 @@ body.panel-open .nav { opacity: 0; pointer-events: none; transform: translate(-5
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* ------------------------------------------------------------------ v0.3.4: live first */
+/* The camera owns the screen: no native video controls (iOS shows a play/pause button when it
+   decides autoplay needs a gesture), translucent controls, compact icon dock. */
+video::-webkit-media-controls, video::-webkit-media-controls-panel, video::-webkit-media-controls-start-playback-button,
+video::-webkit-media-controls-overlay-play-button { display: none !important; -webkit-appearance: none; opacity: 0 !important; }
+.camera-vignette { background: linear-gradient(180deg, rgba(0,0,0,.28), transparent 12%, transparent 80%, rgba(0,0,0,.3)); }
+.camera-top { justify-content: center; }
+.camera-top > .icon-btn { position: absolute; right: 0; }
+.camera .icon-btn, .tl { background: rgba(10,12,15,.32); border-color: rgba(255,255,255,.14); }
+:root { --nav-h: 52px; }
+.nav { width: auto; left: 50%; padding: 0 6px; gap: 4px; grid-template-columns: repeat(3, 56px); border-radius: 999px;
+  background: rgba(10,12,15,.32) !important; border-color: rgba(255,255,255,.14); }
+.nav button { border-radius: 999px; color: var(--chalk) !important; }
+.nav button span { display: none; }
+.sheet { background: rgba(14,16,20,.58) !important; border-color: rgba(255,255,255,.16) !important; }
+.tl-tip, .lens-debug { background: rgba(10,12,15,.5); }
+.lens-debug { color: var(--chalk); }
+
+/* sealed products */
+.sealed-overlay .sealed-sheet { position: relative; display: grid; gap: 8px; text-align: left; padding: 14px; }
+.sealed-sheet.is-loading { padding: 16px; }
+.sealed-x { position: absolute; top: 8px; right: 10px; width: 32px; height: 32px; border: 0; border-radius: 50%; background: rgba(255,255,255,.1); color: var(--chalk); font-size: 20px; line-height: 1; }
+.sealed-main { display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: center; padding: 0; border: 0; background: none; text-align: left; color: inherit; }
+.sealed-body { display: grid; gap: 3px; padding-right: 30px; }
+.sealed-sheet-img, .sealed-thumb { width: 72px; height: 72px; object-fit: contain; border-radius: 10px; background: rgba(255,255,255,.92); }
+.sealed-thumb { width: 52px; height: 52px; flex: none; }
+.sealed-sheet-img.is-empty, .sealed-thumb.is-empty { display: grid; place-items: center; background: var(--well); color: var(--graphite); font-size: 22px; }
+.sealed-price { font: 600 var(--t-17)/1.2 var(--display); }
+.sealed-price small { font: 400 var(--t-12)/1 var(--text); color: var(--graphite); }
+.sealed-code { color: var(--graphite); font-size: var(--t-13); }
+.sealed-actions { display: grid; grid-auto-flow: column; gap: 8px; }
+.sealed-actions button { min-height: 42px; border-radius: 999px; font: 600 var(--t-15)/1 var(--display); }
+.sealed-hero { width: min(70vw, 300px); aspect-ratio: 1; object-fit: contain; border-radius: 18px; background: #fff; }

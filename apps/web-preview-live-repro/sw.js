@@ -1,5 +1,5 @@
-const CACHE='tcg-lens-shell-v7';
-const SHELL=['/','/index.html','/styles.css','/app-1.js','/app-2.js','/app-3.js','/app-4.js','/app-shell.js','/lens/index.js','/manifest.json','/icon.svg','/fonts/barlow-semi-condensed-latin-600-normal.woff2','/fonts/barlow-semi-condensed-latin-700-normal.woff2','/fonts/barlow-latin-400-normal.woff2','/fonts/barlow-latin-500-normal.woff2'];
+const CACHE='tcg-lens-shell-v8';
+const SHELL=['/','/index.html','/styles.css','/app-1.js','/app-2.js','/app-3.js','/app-4.js','/sealed.js','/app-shell.js','/lens/index.js','/manifest.json','/icon.svg','/fonts/barlow-semi-condensed-latin-600-normal.woff2','/fonts/barlow-semi-condensed-latin-700-normal.woff2','/fonts/barlow-latin-400-normal.woff2','/fonts/barlow-latin-500-normal.woff2'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)))});
 self.addEventListener('activate',event=>{self.clients.claim();event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))))});
 self.addEventListener('fetch',event=>{if(event.request.method!=='GET'||new URL(event.request.url).pathname.startsWith('/api/'))return;event.respondWith(fetch(event.request).then(response=>{const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy));return response}).catch(()=>caches.match(event.request).then(response=>response||caches.match('/index.html'))))});

@@ -43,10 +43,12 @@ const scenarios = [
     requirements: { minSegmentCoverage: 0, lockSequence: [] },
   },
   // v0.3.2 auto-language: FR and EN printings share the artwork; the language must be proven.
+  // v0.3.4: when it cannot be read, the printing still locks after languageGraceMs with the
+  // language shown as unverified (never guessed); a read of a foreign language still blocks.
   {
-    id: 'multi-language-family-never-locks-without-language-proof',
+    id: 'multi-language-family-locks-with-language-unverified-after-grace',
     run: () => runReplay({ languages: ['fr', 'en'] }),
-    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
   {
     id: 'multi-language-family-locks-after-two-agreeing-language-reads',
@@ -54,9 +56,9 @@ const scenarios = [
     requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
   {
-    id: 'conflicting-language-reads-never-lock',
+    id: 'conflicting-fr-en-reads-lock-printing-with-language-unverified',
     run: () => { let n = 0; return runReplay({ languages: ['fr', 'en'], langRead: () => (n++ % 2 ? 'en' : 'fr') }); },
-    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
   {
     // Japanese card whose artwork matches an English-only printing (JA twin absent from the index).
@@ -65,14 +67,19 @@ const scenarios = [
     requirements: { minSegmentCoverage: 0, lockSequence: [] },
   },
   {
+    id: 'japanese-text-on-fr-en-printing-never-locks',
+    run: () => runReplay({ languages: ['fr', 'en'], langRead: () => 'ja' }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
     id: 'japanese-printing-locks-with-japanese-reads',
     run: () => runReplay({ languages: ['ja'], langRead: () => 'ja' }),
     requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
   {
-    id: 'auto-scan-single-language-printing-waits-for-a-language-read',
+    id: 'auto-scan-single-language-printing-locks-after-grace',
     run: () => runReplay({ languages: ['en'] }),
-    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
   {
     id: 'fixed-scan-language-needs-no-language-read',

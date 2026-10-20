@@ -20,6 +20,13 @@ export class EvidenceFusion {
       return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: `language_contradiction:${v.languageContradiction}` };
     }
     if (d.decision === 'LOCK' && d.reason !== 'verified_barcode' && (v.languages?.length || 0) > 0 && !v.resolvedLang) {
+      // Identity is proven but the language is not readable (blur, glare, slow OCR): after a grace
+      // delay, lock the printing and show the language as unverified, unless a read pointed to a
+      // language the printing does not exist in.
+      const grace = this.policy.languageGraceMs ?? Infinity;
+      if ((v.languageWaitMs ?? 0) >= grace && !v.languageOutside) {
+        return { ...d, languageUnverified: true, reason: `${d.reason}+language_unverified` };
+      }
       return { decision: 'VERIFY', candidateId: d.candidateId, confidence: Math.min(0.89, d.confidence), reason: 'language_unresolved', pendingLock: d.reason };
     }
     return d;
@@ -78,6 +85,19 @@ export class EvidenceFusion {
     const ocrConceptSupports = Boolean(
       ocr?.candidateId === candidateId && ocr.strongNameMatch === true && !ocr.contradiction
     );
+    // v0.3.4: the printed name (2-read consensus) confirms the card; the visual margin separates
+    // printings (identical-artwork reprints are excluded above by lockBlockedReason / margin).
+    // Only for candidates whose set is visually complete (visualOnlyLockAllowed): every printing of
+    // the set is indexed, so the visual margin really separates printings. Elsewhere a name read
+    // alone still cannot lock an exact printing.
+    if (p.lockWithPrintedName && visual.visualOnlyLockAllowed === true && votesOk && marginOk && qualityOk && ocrConceptSupports
+      && top.avgScore >= (p.lockVisualScoreWithPrinting ?? p.lockVisualScore) && visual.embeddingVerified === true) {
+      const confidence = Math.min(0.985, 0.7 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.01);
+      if (!ocrPrintingSupports) return {
+        decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_printed_name',
+        evidence: { ocrPrintingSupports: false, ocrConceptSupports: true, softContradictions: contradiction.softReasons },
+      };
+    }
     if (votesOk && scoreOk && marginOk && !qualityOk) {
       return { decision: 'CONTINUE', candidateId, confidence: 0, reason: 'frame_quality_insufficient_for_lock' };
     }

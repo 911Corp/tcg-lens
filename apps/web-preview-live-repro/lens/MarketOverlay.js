@@ -27,7 +27,10 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
     setName: identity.setName || c.set?.name || c.set?.id || 'Extension inconnue',
     // Printed form: the total is zero-padded like the number ("001/084").
     number: total ? `${number}/${/^\d+$/.test(number) ? String(total).padStart(number.length, '0') : total}` : number,
-    language: LANG[identity.lang || c.lang] || (identity.lang || '').toUpperCase(),
+    // Language only when proven; otherwise say so (FR and EN share the printing).
+    language: identity.languageUnverified
+      ? `Langue à confirmer${identity.languageCandidates?.length > 1 ? ` (${identity.languageCandidates.map(l => l.toUpperCase()).join(' / ')})` : ''}`
+      : LANG[identity.lang || c.lang] || (identity.lang || '').toUpperCase(),
     variant: identity.variantProven ? (identity.variantLabel || null) : null,
     confidence: Math.round((confidence || 0) * 100),
     loadingMarket: card == null,
@@ -56,7 +59,7 @@ export class MarketOverlay {
     this._paint(lockedSheetModel(identity, null, confidence), identity);
     let card = null;
     try {
-      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || 'fr')}`);
+      const response = await fetch(`/api/card?id=${encodeURIComponent(identity.id)}&lang=${encodeURIComponent(identity.lang || identity.languageCandidates?.[0] || 'fr')}`);
       if (response.ok) card = await response.json();
     } catch {}
     if (seq !== this.seq) return; // a newer card (or a clear) happened meanwhile
