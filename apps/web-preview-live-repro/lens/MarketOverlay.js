@@ -132,7 +132,7 @@ export class MarketOverlay {
     if (!this.root || !items?.length) return;
     this.seq++; this.current = null; this.lastCard = null;
     this.root.hidden = false; this.root.classList.remove('is-dim');
-    const label = x => x.numberMatch ? t('Numéro concordant') : x.remembered ? t('Déjà confirmée par vous') : x.twin ? t('Même illustration') : x.p >= 0.85 ? t('Très probable') : t('Probable');
+    const label = x => x.edition ? t('Édition reconnue') : x.numberMatch ? t('Numéro concordant') : x.remembered ? t('Déjà confirmée par vous') : x.twin ? t('Même illustration') : x.p >= 0.85 ? t('Très probable') : t('Probable');
     const num = x => { const n = x.printedNumber || (x.printedTotal ? `${x.localId}/${/^\d+$/.test(String(x.localId)) ? String(x.printedTotal).padStart(String(x.localId).length, '0') : x.printedTotal}` : x.localId); return n || ''; };
     const langs = x => (x.languages?.length > 1 ? `${x.languages.map(l => l.toUpperCase()).join('/')} ?` : (x.languages?.[0] || x.lang || '').toUpperCase());
     this.root.innerHTML = `

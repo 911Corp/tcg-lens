@@ -8,7 +8,7 @@
       { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
     ] },
     { "source": "/fonts/(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ] },
-    { "source": "/data/(visual-index|deep)-(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=604800" } ] },
+    { "source": "/data/(visual-index|deep|region)-(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=604800" } ] },
     { "source": "/sw.js", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
   ]
 }

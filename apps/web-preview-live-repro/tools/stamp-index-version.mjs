@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises'; import path from 'node:path'; import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const data = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
-const files = (await fs.readdir(data)).filter(f => /^(deep-|visual-index-)/.test(f)).sort();
+const files = (await fs.readdir(data)).filter(f => /^(deep-|visual-index-|region-)/.test(f)).sort();
 const h = crypto.createHash('sha256');
 for (const f of files) { h.update(f); h.update(await fs.readFile(path.join(data, f))); }
 const version = h.digest('hex').slice(0, 12);

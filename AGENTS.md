@@ -21,7 +21,7 @@ Run:
 npm run validate:local
 ```
 
-Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 102/102,
+Expected baseline (v0.3.8): resolution 4/4, ingestion 18/18, market 9/9, sealed 5/5, TCGplayer Japan gaps 5/5, Lens runtime/policy 104/104,
 benchmark 19/19 with FCIR 0, TypeScript compiles, web/API syntax passes, iOS Swift syntax parses (macOS; skipped
 explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to a database migrated with
 0001-0008, the four PostgreSQL integration suites must pass too.
@@ -41,6 +41,9 @@ explicitly elsewhere unless `REQUIRE_SWIFT=1`). With `TEST_DATABASE_URL` set to 
 - Instant visual locks are allowed only for twin-free candidates on the calibrated scale (`CALIBRATED_POLICY`);
   artwork twins always need printed evidence. Language is never guessed: shown unverified, proven in background,
   and a contradicting read withdraws the lock.
+- Edition/script evidence between artwork twins comes only from `lens/RegionIndex.js` under the bars written by
+  `tools/deep/train-regions.py` (zero wrong editions at bar − 0.03; script proof confirm-only). Rebuild it after any
+  backbone change.
 - Rerun `tools/deep/calibrate-proposals.py` after every `train-and-export.py` (gate: right card among shown proposals ≥ 97 %).
 - Instant thresholds and the Latin/Japanese script gap come from `deep-index.json` (written by the training
   script's calibration); never hard-code new ones in the app. Twins printing the same number/total stay AMBIGUOUS.

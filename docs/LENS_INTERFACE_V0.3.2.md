@@ -308,3 +308,27 @@ d’identification automatique (FCIR 0 inchangé).
 - **Apprentissage sur l’appareil** (`lens/ScanMemory.js`) : une proposition confirmée mémorise le descripteur 128-d du
   scan (pas l’image), 400 au plus, sur l’appareil uniquement ; un scan très proche (cosinus ≥ 0,92) remet cette carte
   en tête des propositions (« Déjà confirmée par vous »). La mémoire n’alimente jamais l’identification automatique.
+
+## v0.4.2 — modèle de zones : départager les éditions jumelles
+
+**Diagnostic** (3 993 recadrages caméra tenus à l’écart, modèle calibré) : erreur au premier rang 8,7 %, dont 95 % sont
+des jumelles d’illustration — 2,7 % autre écriture (JA ↔ EN/FR), 5,6 % même écriture (rééditions) — et seulement
+0,45 % de vraies confusions (la bonne carte est alors 2ᵉ ou 3ᵉ). L’illustration est donc bien reconnue ; ce qui
+manque, c’est l’édition.
+
+**Modèle de zones** (`tools/deep/region-jobs.py` → `region-crops.mjs` → `train-regions.py`, `lens/RegionIndex.js`) :
+trois zones d’une carte redressée en 448 px — texte, bande du bas (symbole d’extension, numéro, copyright), bande du
+haut (nom, PV/HP) — descripteurs MobileNet, blanchiment appris (recadrage caméra ↔ référence propre, 10 764 paires),
+96 dimensions ; index des 37 069 références des familles qui ont des jumelles (≈ 4 Mo, chargé au premier besoin).
+- Éditions jumelles (4 902 cas tenus à l’écart) : bonne édition en tête 91,4 %. Décision : 2 vérifications
+  concordantes à marge ≥ 0,13 (0 erreur à 0,10) ou 3 concordantes à ≥ 0,09 (calibré sur paires de recadrages de la
+  même carte, 0 erreur à 0,06). Une jumelle sans référence de zone bloque la décision.
+- Écriture JA/latin (5 700 cas) : P(japonais) ≥ 0,9995 ou ≤ 0,0005, 34 % des cas tranchés, 1 erreur résiduelle (image
+  de référence d’un ancien set japonais probablement mal étiquetée) → utilisée en **confirmation seulement** : elle
+  peut confirmer l’écriture de la candidate en tête du modèle global (et écarter les jumelles de l’autre écriture),
+  jamais la contredire.
+- Effet : `_resolveTwins` retient l’édition décidée (jumelles levées, verrou instantané possible sous les seuils
+  habituels) ; les propositions classent les jumelles par zones (« Édition reconnue »). Grafaiai (jumelle JA) est
+  maintenant identifié sans lecture du texte ; les reproductions quasi exactes (Dracaufeu Set de Base / Collection
+  Classique) restent en propositions.
+- Fichiers `region-*` versionnés par l’empreinte d’index et en cache hors ligne.

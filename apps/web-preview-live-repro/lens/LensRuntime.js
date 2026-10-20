@@ -2,6 +2,7 @@ import { FrameWorker } from './FrameWorker.js';
 import { MultiScan } from './MultiScan.js';
 import { ProposalTracker, stablePrintedRead } from './Proposals.js';
 import { ScanMemory } from './ScanMemory.js';
+import { RegionIndex } from './RegionIndex.js';
 import { DEFAULT_POLICY, LENS_STATES, CALIBRATED_POLICY } from './config.js';
 
 // Language belongs to the physical card in the track, whatever candidate is on top.
@@ -49,6 +50,8 @@ export class LensRuntime {
     this.frames = FrameWorker.supported() ? new FrameWorker() : null;
     this.multiMode = false; this.multiLayer = multiLayer; this.multi = null;
     this.memory = new ScanMemory();
+    this.regions = new RegionIndex();
+    this.regionRectifier = new PerspectiveRectifier({ width: 448, aspect: this.policy.cardAspect });
     this.detector = new CardDetector({ frames: this.frames });
     this.tracker = new TrackManager(this.policy);
     this.rectifier = new PerspectiveRectifier({ width: this.policy.rectifiedWidth, aspect: this.policy.cardAspect });
@@ -354,6 +357,7 @@ export class LensRuntime {
       langConsensus: new LanguageConsensus({ singleLanguageReads: this.lang === 'auto' ? 1 : 0 }),
       // v0.4.1 proposals: calibrated, temporally consistent, never contradicted by printed evidence.
       proposals: new ProposalTracker(), ocrTexts: [], proposalsShown: '', proposalsRejected: false, startedAt: performance.now(),
+      region: { checks: [], resolvedId: null, script: null, at: 0, inFlight: false },
     };
     this.bestFrame.reset();
     if (resetState) this.stateMachine.reset({ reason, generation: track.generation, trackId: track.id });
@@ -375,6 +379,7 @@ export class LensRuntime {
         score: k.score?.toFixed(3), margin: i === 0 && Number.isFinite(k.marginNonTwin) ? k.marginNonTwin.toFixed(3) : undefined, twins: i === 0 ? k.twins?.length : undefined,
       }));
       if (!this._isCurrent(token)) return;
+      if (candidates[0]?.calibrated && candidates[0].twins?.length && !c.locked) this._maybeRegionCheck(track, c, candidates);
       if (candidates[0]?.calibrated) candidates.splice(0, candidates.length, ...this._resolveTwins(c, candidates));
       c.visualCandidates = candidates;
       if (!candidates.length) {
@@ -433,7 +438,12 @@ export class LensRuntime {
     // Calibrated visual script proof (Latin vs Japanese): when the image clearly favours the top
     // family's script, twins of the other script are ruled out without waiting for OCR.
     const scriptOf = ls => ((ls || []).includes('ja') ? 'ja' : 'latin');
-    const visualScript = !lang && Number.isFinite(top.scriptGap) && Number.isFinite(this.policy.scriptGap) && top.scriptGap >= this.policy.scriptGap ? top.script : null;
+    const gapScript = !lang && Number.isFinite(top.scriptGap) && Number.isFinite(this.policy.scriptGap) && top.scriptGap >= this.policy.scriptGap ? top.script : null;
+    // v0.4.2: zone-based script proof (calibrated, 2 agreeing checks) when the global gap does not decide.
+    // Confirm-only: the zone script may only confirm the script of the global top, never flip it.
+    const visualScript = gapScript || (!lang && c.region?.script && c.region.script === scriptOf(top.languages) ? c.region.script : null) || null;
+    // v0.4.2: zone-based edition decision among the twins (calibrated margin, 2 agreeing checks).
+    const regionId = c.region?.resolvedId && group.includes(c.region.resolvedId) && cands.some(x => x.id === c.region.resolvedId) ? c.region.resolvedId : null;
     let chosenId = top.id;
     const prev = c.visualEvidence?.candidateId;
     if (prev && group.includes(prev) && cands.some(x => x.id === prev)) chosenId = prev;
@@ -443,11 +453,13 @@ export class LensRuntime {
       if (alt) chosenId = alt;
     }
     if (visualScript && scriptOf(langsOf(chosenId)) !== visualScript) chosenId = top.id;
+    if (regionId && (!lang || langsOf(regionId).includes(lang))) chosenId = regionId;
     const chosen = cands.find(x => x.id === chosenId) || top;
     chosen.calibrated = true;
     chosen.marginNonTwin = top.marginNonTwin;
     chosen.twinGroup = group;
-    chosen.activeTwins = group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)) && (!visualScript || scriptOf(langsOf(id)) === visualScript));
+    chosen.activeTwins = regionId === chosen.id ? [] : group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)) && (!visualScript || scriptOf(langsOf(id)) === visualScript));
+    chosen.regionResolved = regionId === chosen.id;
     chosen.visualScript = visualScript;
     // Printed evidence can only separate twins whose printed number/total differ (Base Set Charizard,
     // Base Set 2, Legendary Collection and the Classic Collections all print "4/102").
@@ -681,6 +693,43 @@ export class LensRuntime {
     this.telemetry.emit('FRAME_WORKER_RESTART', { attempt: this.frameRestarts });
   }
 
+  /**
+   * v0.4.2 — zone comparison between the top candidate and its artwork twins (async, at most every 600 ms).
+   * A decision counts only when two consecutive checks agree, each above the calibrated bar.
+   */
+  _maybeRegionCheck(track, c, candidates) {
+    const R = c.region, now = performance.now();
+    if (R.inFlight || now - R.at < 600 || this.regions.failed) return;
+    R.inFlight = true; R.at = now;
+    const top = candidates[0], ids = [top.id, ...top.twins.map(t => t.id)];
+    const generation = c.generation;
+    (async () => {
+      try {
+        if (!(await this.regions.load())) return;
+        const canvas = await this.regionRectifier.rectifyAsync(this.video, track.quad, this.frames);
+        if (!canvas || this.context !== c || c.generation !== generation || c.locked) return;
+        const embs = await this.embedding.embedBatch(this.regions.zones(canvas));
+        if (!embs?.every(Boolean) || this.context !== c) return;
+        const q = this.regions.project(embs);
+        const deep = this.index.deep;
+        const fams = ids.map(id => ({ id, rows: deep.famRows[deep.famIndex.get(id)] || [] }));
+        const d = this.regions.decide(q, fams);
+        const script = this.regions.script(q);
+        R.checks.push({ id: d.id, decided: d.decided, margin: d.margin, script, group: ids.join(',') }); if (R.checks.length > 4) R.checks.shift();
+        // Decided: 2 agreeing checks above the single-check bar, or 3 agreeing checks above the calibrated
+        // agreeing-checks bar (tools/deep/train-regions.py, zero errors on held-out crop pairs).
+        const cal = this.regions.meta.calibration;
+        const agree = (n, bar) => { const last = R.checks.slice(-n); return last.length === n && last.every(x => x.id === last[0].id && x.group === last[0].group && x.margin >= bar); };
+        R.resolvedId = agree(2, cal.twinMargin) || (Number.isFinite(cal.twinAgreeMargin) && agree(cal.twinAgreeRequired || 3, cal.twinAgreeMargin)) ? d.id : null;
+        const [a, b] = R.checks.slice(-2);
+        R.script = a && b && a.script && a.script === b.script ? b.script : null;
+        R.scores = d.scores;
+        this.telemetry.emit('REGION_CHECK', { id: d.id, margin: Math.round(d.margin * 1000) / 1000, decided: d.decided, script, resolved: R.resolvedId });
+      } catch (error) { this.telemetry.emit('REGION_ERROR', { message: error.message }); }
+      finally { R.inFlight = false; }
+    })();
+  }
+
   /** v0.4.0 — app language changed: re-render the HUD, the result (name row, market) and the multi-card labels. */
   onUiLanguage() {
     const c = this.context;
@@ -715,7 +764,9 @@ export class LensRuntime {
     // Artwork twins of the leading proposal (same illustration in other printings, reference similarity ≥ 0.8)
     // are proposed with it: the picture alone cannot tell them apart, the user can.
     const lead = c.visualCandidates.find(k => k.id === list[0].id);
-    for (const tw of (lead?.twins || []).slice().sort((a, b) => (lead.twinScores?.[b.id] ?? 0) - (lead.twinScores?.[a.id] ?? 0))) {
+    const zone = new Map((c.region?.scores || []).map(s => [s.id, s.score]));
+    const twinOrder = (a, b) => (zone.has(a.id) && zone.has(b.id) ? zone.get(b.id) - zone.get(a.id) : (lead.twinScores?.[b.id] ?? 0) - (lead.twinScores?.[a.id] ?? 0));
+    for (const tw of (lead?.twins || []).slice().sort(twinOrder)) {
       if (list.length >= 3) break;
       const cand = c.visualCandidates.find(k => k.id === tw.id);
       if (!cand || list.some(x => x.id === tw.id)) continue;
@@ -723,11 +774,12 @@ export class LensRuntime {
       if (evidence.language && !langs.includes(evidence.language)) continue;
       list.push({ id: tw.id, p: list[0].p, twin: true, numberMatch: false });
     }
+    if (c.region?.resolvedId) list.sort((a, b) => (b.id === c.region.resolvedId) - (a.id === c.region.resolvedId));
     const items = list.map(x => {
       const cand = c.visualCandidates.find(k => k.id === x.id);
       const row = (evidence.language && cand.byLang?.[evidence.language])
         || cand.byLang?.[(document.documentElement.lang || 'fr').slice(0, 2)] || cand;
-      return { ...row, languages: cand.languages, p: x.p, numberMatch: x.numberMatch, remembered: x.remembered, twin: Boolean(x.twin) };
+      return { ...row, languages: cand.languages, p: x.p, numberMatch: x.numberMatch, remembered: x.remembered, twin: Boolean(x.twin), edition: c.region?.resolvedId === x.id };
     });
     this.telemetry.emit('PROPOSALS', { ids: list.map(x => x.id), p: list.map(x => Math.round(x.p * 100) / 100) });
     this.marketOverlay.showProposals(items);
