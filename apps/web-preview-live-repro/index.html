@@ -29,44 +29,12 @@
 
 <main class="app-shell" id="app">
 
-  <!-- Accueil -->
-  <section class="screen paper on" id="home" aria-label="Accueil">
-    <div class="home">
-      <header class="brand"><span class="brandmark" aria-hidden="true"></span><span>TCG Lens</span></header>
-      <div class="home-stage" aria-hidden="true">
-        <div class="specimen">
-          <span class="specimen-card"></span>
-          <span class="specimen-frame"></span>
-        </div>
-      </div>
-      <div class="home-copy">
-        <h1>Visez une carte.<br />Le Lens la reconnaît.</h1>
-        <p>Nom, extension, numéro et prix du marché, directement sur l’image de la caméra. Quand les indices ne suffisent pas, il vous le dit au lieu de deviner.</p>
-      </div>
-      <div class="home-lang">
-        <span id="homeLangLabel">Langue de vos cartes</span>
-        <div class="lang-switch" role="radiogroup" aria-labelledby="homeLangLabel" data-lang-switch>
-          <button type="button" role="radio" data-lang="fr">FR</button><button type="button" role="radio" data-lang="en">EN</button><button type="button" role="radio" data-lang="ja">JA</button>
-        </div>
-      </div>
-      <div class="home-actions">
-        <button class="primary full" id="startBtn">Ouvrir la caméra</button>
-        <button class="secondary full" data-go="search">Parcourir le catalogue</button>
-        <button class="ghost full" id="installBtn" style="display:none">Installer l’app</button>
-        <p class="install-hint" id="iosInstall"></p>
-      </div>
-    </div>
-  </section>
-
   <!-- Lens -->
-  <section class="screen camera" id="lens" aria-label="Scanner">
+  <section class="screen camera on" id="lens" aria-label="Scanner">
     <video id="camera" autoplay playsinline muted></video>
     <div class="camera-vignette" aria-hidden="true"></div>
     <header class="camera-top">
-      <button class="icon-btn" data-go="home" aria-label="Fermer le scanner"><svg><use href="#i-close"/></svg></button>
-      <div class="lang-switch on-camera" role="radiogroup" aria-label="Langue de scan" data-lang-switch>
-        <button type="button" role="radio" data-lang="fr">FR</button><button type="button" role="radio" data-lang="en">EN</button><button type="button" role="radio" data-lang="ja">JA</button>
-      </div>
+      <span class="brand on-camera"><span class="brandmark" aria-hidden="true"></span><span>TCG Lens</span></span>
       <button class="icon-btn" data-go="legend" aria-label="Comment lire le scanner"><svg><use href="#i-info"/></svg></button>
       <span id="livePill" hidden></span>
     </header>
@@ -76,10 +44,13 @@
     <div class="lens-debug" id="lensDebug" hidden></div>
   </section>
 
+  <div class="panel-scrim" id="sheetScrim" aria-hidden="true"></div>
+
   <!-- Catalogue -->
-  <section class="screen paper" id="search" aria-label="Catalogue">
+  <section class="screen paper panel" id="search" aria-label="Catalogue" aria-hidden="true">
+    <span class="panel-grab" aria-hidden="true"></span>
     <div class="content-shell">
-      <header class="topbar"><h2>Catalogue</h2></header>
+      <header class="topbar"><h2>Catalogue</h2><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-close"/></svg></button></header>
       <div class="searchbox">
         <div class="searchrow">
           <label class="visually-hidden" for="searchInput">Rechercher</label>
@@ -95,52 +66,56 @@
   </section>
 
   <!-- Fiche -->
-  <section class="screen paper" id="detail" aria-label="Fiche">
+  <section class="screen paper panel" id="detail" aria-label="Fiche" aria-hidden="true">
+    <span class="panel-grab" aria-hidden="true"></span>
     <button class="icon-btn detail-back" id="detailBack" aria-label="Retour"><svg><use href="#i-back"/></svg></button>
     <div class="detail-hero" id="detailHero"><div class="spinner"></div></div>
     <div class="detail-content" id="detailContent"></div>
   </section>
 
   <!-- Collection -->
-  <section class="screen paper" id="collection" aria-label="Collection">
+  <section class="screen paper panel" id="collection" aria-label="Collection" aria-hidden="true">
+    <span class="panel-grab" aria-hidden="true"></span>
     <div class="content-shell">
-      <header class="topbar"><h2>Collection</h2><button class="icon-btn" id="clearCollection" aria-label="Vider la collection"><svg><use href="#i-trash"/></svg></button></header>
+      <header class="topbar"><h2>Collection</h2><button class="icon-btn" id="clearCollection" aria-label="Vider la collection"><svg><use href="#i-trash"/></svg></button><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-close"/></svg></button></header>
       <p class="meta-line">Enregistrée sur cet appareil uniquement.</p>
       <div id="collectionBody"></div>
     </div>
   </section>
 
   <!-- Réglages -->
-  <section class="screen paper" id="settings" aria-label="Réglages">
+  <section class="screen paper panel" id="settings" aria-label="Réglages" aria-hidden="true">
+    <span class="panel-grab" aria-hidden="true"></span>
     <div class="content-shell">
-      <header class="topbar"><h2>Réglages</h2></header>
+      <header class="topbar"><h2>Réglages</h2><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-close"/></svg></button></header>
       <div class="settings-list">
-        <div class="setting"><label for="settingsLang">Langue de scan</label><p>Le Lens compare la carte au catalogue de cette langue uniquement.</p><select id="settingsLang"><option value="fr">Français</option><option value="en">English</option><option value="ja">日本語</option></select></div>
+        <div class="setting"><label for="scanLang">Langue des cartes</label><p>En automatique, le Lens compare la carte au catalogue français, anglais et japonais, puis lit le texte imprimé pour confirmer la langue. Il n’affiche jamais une langue qu’il n’a pas vérifiée.</p><select id="scanLang"><option value="auto">Automatique (recommandé)</option><option value="fr">Français uniquement</option><option value="en">Anglais uniquement</option><option value="ja">Japonais uniquement</option></select></div>
         <div class="setting"><label>Caméra</label><p>Si l’image reste noire, relancez la caméra arrière.</p><button class="secondary full" id="restartCamera">Relancer la caméra</button></div>
         <div class="setting"><label>Fiabilité</label><p>Le Lens ne valide une carte qu’après plusieurs images concordantes et, si besoin, la lecture du numéro imprimé. Sinon il reste en « Identification incertaine » plutôt que de proposer une carte au hasard.</p></div>
         <div class="setting"><label>Codes-barres enregistrés</label><p id="barcodeCount">0 association</p><button class="ghost full" id="clearBarcodes">Effacer les codes-barres enregistrés</button></div>
-        <div class="setting"><label>Application</label><button class="secondary full" id="settingsInstall">Ajouter à l’écran d’accueil</button></div>
+        <div class="setting"><label>Application</label><p id="iosInstall"></p><button class="secondary full" id="settingsInstall">Ajouter à l’écran d’accueil</button></div>
         <div class="setting"><label>Confidentialité</label><p>L’image de la caméra reste sur l’appareil. Les prix ne sont chargés qu’une fois la carte identifiée. Volumes et stocks ne sont jamais inventés : s’ils manquent, ils sont marqués « Non disponible ».</p></div>
       </div>
     </div>
   </section>
 
   <!-- Aide -->
-  <section class="screen paper" id="legend" aria-label="Comment lire le scanner">
+  <section class="screen paper panel" id="legend" aria-label="Comment lire le scanner" aria-hidden="true">
+    <span class="panel-grab" aria-hidden="true"></span>
     <div class="content-shell">
-      <header class="topbar"><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-back"/></svg></button><h2>Lire le scanner</h2></header>
+      <header class="topbar"><h2>Lire le scanner</h2><button class="icon-btn" data-go="lens" aria-label="Retour au scanner"><svg><use href="#i-close"/></svg></button></header>
       <ol class="legend">
         <li data-tone="work"><b>Le cadre se referme</b><p>Les coins s’allongent à mesure que les images concordent avec le catalogue.</p></li>
         <li data-tone="attention"><b>Message ambre</b><p>Le Lens a besoin de vous : rapprochez la carte, évitez un reflet, ou rendez le numéro lisible.</p></li>
         <li data-tone="locked"><b>Contour holographique</b><p>La carte est identifiée : nom, extension, numéro et prix s’affichent. Touchez la fiche pour le détail.</p></li>
-        <li data-tone="fail"><b>Carte non reconnue</b><p>Aucune correspondance fiable. Vérifiez la langue de scan en haut de l’écran.</p></li>
+        <li data-tone="work"><b>Langue détectée seule</b><p>Pas besoin de choisir : français, anglais et japonais sont comparés en même temps. Si une carte existe dans plusieurs langues, le Lens lit le texte imprimé (PV ou HP, nom) avant de valider.</p></li>
+        <li data-tone="fail"><b>Carte non reconnue</b><p>Aucune correspondance fiable. Essayez sous un autre angle, sans reflet.</p></li>
       </ol>
       <p class="meta-line">Le Heat (bêta) n’utilise aujourd’hui que l’évolution des prix ; les ventes et le stock ne sont pas encore disponibles.</p>
     </div>
   </section>
 
   <nav class="nav" id="nav" aria-label="Navigation principale">
-    <button data-go="lens" data-nav="lens"><svg><use href="#i-lens"/></svg><span>Scanner</span></button>
     <button data-go="search" data-nav="search"><svg><use href="#i-search"/></svg><span>Catalogue</span></button>
     <button data-go="collection" data-nav="collection"><svg><use href="#i-binder"/></svg><span>Collection</span></button>
     <button data-go="settings" data-nav="settings"><svg><use href="#i-gear"/></svg><span>Réglages</span></button>

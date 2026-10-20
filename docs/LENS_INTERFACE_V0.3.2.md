@@ -36,3 +36,38 @@ OCR unreadable on synthetic video) and escalates to "Numéro illisible" after 6 
 
 ## Still to prove on devices
 OCR quality on real phones, lock latency, warm-up speed on iOS/Android, thermal behaviour.
+
+## v0.3.2 — Camera-first, instant search, automatic language
+
+**Launch.** The app opens directly on the live scanner: the camera starts on load (HUD "Activation de la
+caméra" while the permission prompt is open, "Réessayer" if refused). There is no home screen. Catalogue,
+collection, settings, help and the card sheet are panels sliding over the live camera (swipe down, ✕ or tap
+the dimmed camera to close); confirmations are pop-ups, never native dialogs.
+
+**Instant search.** The whole canonical pool (FR 17 113, EN 19 633, JA 3 870 references) ships as a
+precomputed visual index (`data/visual-index-{lang}.json` + Int8 descriptors `.bin`, gzip `.bin.gz` inflated
+with `DecompressionStream`), built in Chromium with the exact client descriptor code
+(`tools/build-visual-index.mjs`). It is downloaded once at launch, before the camera permission is granted,
+so the scanner compares against the full catalogue from the first frame (no progressive warm-up). Each query:
+fast-descriptor prefilter over every reference grouped by printing family (top 24), then deep MobileNet
+re-scoring of the best 8 in one batch; reference images load straight from the TCGdex CDN (CORS), the proxy
+is only a fallback. Cadence: visual 300 ms (was 520), OCR 1.6 s (was 2.6), OCR on a dedicated 640 px
+rectification.
+
+**No language choice.** FR and EN printings share the same TCGdex id and artwork, so they form one family;
+JA printings have their own ids. The physical language is proven from printed text (`LanguageEvidence.js`):
+- Latin reader (eng): PV/HP, Faiblesse/Weakness, Retraite/Retreat, rules-text words, language-specific names;
+- Japanese reader (jpn, title zone, in parallel): Japanese is read only when the Latin reader recognises
+  almost no confident word (< 3; Latin cards give 15+) and the Japanese reader finds confident kana.
+Consensus per family: multi-language → 2 agreeing reads, no disagreement; single-language in auto mode → 1
+agreeing read; 2 reads of a language the printing does not exist in → AMBIGUOUS
+(`language_contradiction:ja`, e.g. a Japanese card whose JA twin is missing from the catalogue). The locked
+printing is the row of the proven language. A fixed scan language remains in Réglages.
+
+**Fusion.** With a 2-read exact printed number + total consensus on the visual top, the visual score bar is
+0.90 instead of 0.94 (camera vs catalogue scan); margin, votes and quality bars are unchanged.
+
+**Measured (headless Chromium, CPU-only, synthetic camera — not a phone):** index ready 0.6 s after load;
+FR Tropius me05-001 locked as *Français* without any language choice; EN Tropius language proven *Anglais*;
+JA Arceus V S9-112 language proven *Japonais*, held AMBIGUOUS (near-identical JA sibling, margin < 0.06).
+Benchmark 14/14, FCIR 0. Real-device latency still has to be measured.

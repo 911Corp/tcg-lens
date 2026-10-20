@@ -1,8 +1,17 @@
 import { cosine } from './VisualEmbeddingAdapter.js';
+import { PrecomputedIndex, INDEX_LANGS } from './PrecomputedIndex.js';
+
+/** 'auto' scans every language; otherwise a single language scope. */
+export function scopeLangs(lang) { return lang === 'auto' || !lang ? [...INDEX_LANGS] : [lang]; }
 
 export class ANNIndex {
-  constructor({ maxRefs = 1200 } = {}) {
+  constructor({ maxRefs = 1200, precomputed = null, prefilter = 24, rerank = 8 } = {}) {
     this.maxRefs = maxRefs;
+    this.pre = precomputed || new PrecomputedIndex();
+    this.prefilter = prefilter;
+    this.rerank = rerank;
+    this.deepCache = new Map();
+    this.deepInFlight = new Map();
     this.refs = new Map();
     this.db = null;
     this.loading = null;
@@ -11,8 +20,28 @@ export class ANNIndex {
     this.poolTotal = new Map();
   }
 
-  /** Number of refs the bounded on-device index aims to hold for a language. */
-  target(lang) { const total = this.poolTotal.get(lang); return total == null ? this.maxRefs : Math.min(this.maxRefs, total); }
+  /** Number of refs the on-device index aims to hold for a language scope. */
+  target(lang) {
+    if (this.preTarget) return this.preTarget;
+    const total = this.poolTotal.get(lang); return total == null ? this.maxRefs : Math.min(this.maxRefs, total);
+  }
+
+  /** Loads the precomputed index (all languages for 'auto'). Returns false if unavailable. */
+  async loadPrecomputed(lang, onProgress = () => {}) {
+    const langs = scopeLangs(lang);
+    this.preTarget = null;
+    try {
+      // Expected totals are known only after load; report progress per language file.
+      await this.pre.load(langs, p => onProgress({ loaded: p.loaded, langs }));
+      this.preTarget = this.pre.count(langs);
+      return true;
+    } catch (error) {
+      this.preError = String(error?.message || error);
+      return false;
+    }
+  }
+
+  usesPrecomputed(lang) { return scopeLangs(lang).every(l => this.pre.isLoaded(l)); }
 
   async open() {
     if (this.db || typeof window === 'undefined' || !('indexedDB' in window)) return this.db;
@@ -35,7 +64,10 @@ export class ANNIndex {
     await this.loading; this.loading = null;
   }
 
-  count(lang) { let n = 0; for (const r of this.refs.values()) if (r.lang === lang) n++; return n; }
+  count(lang) {
+    if (this.usesPrecomputed(lang)) return this.pre.count(scopeLangs(lang));
+    const langs = scopeLangs(lang); let n = 0; for (const r of this.refs.values()) if (langs.includes(r.lang)) n++; return n;
+  }
 
   async put(row) {
     this.refs.set(row.key, row);
@@ -45,8 +77,9 @@ export class ANNIndex {
 
   fastTopK(vector, lang, k = 12) {
     const top = [];
+    const langs = scopeLangs(lang);
     for (const ref of this.refs.values()) {
-      if (ref.lang !== lang || !ref.fast) continue;
+      if (!langs.includes(ref.lang) || !ref.fast) continue;
       const score = cosine(vector, ref.fast);
       top.push({ ref, fastScore: score }); top.sort((a, b) => b.fastScore - a.fastScore); if (top.length > k) top.pop();
     }
@@ -54,6 +87,7 @@ export class ANNIndex {
   }
 
   async query(canvas, lang, embedding, k = 6) {
+    if (this.usesPrecomputed(lang)) return this._queryPrecomputed(canvas, lang, embedding, k);
     if (!this.count(lang)) return [];
     const fastVector = embedding.fastDescriptor(canvas);
     const pre = this.fastTopK(fastVector, lang, Math.max(k * 2, 10));
@@ -76,8 +110,62 @@ export class ANNIndex {
     return pre.slice(0, k).map(x => ({ ...x.ref, score: x.score ?? x.fastScore, fastScore: x.fastScore, deepScore: x.deepScore, embeddingVerified: x.deepScore != null }));
   }
 
+  /**
+   * Precomputed path: fast prefilter over every reference of the scope (one entry per printing
+   * family), then deep re-scoring of the best `rerank` families in parallel. Only deep-verified
+   * hits are returned when the model is available, so scores share one scale.
+   */
+  async _queryPrecomputed(canvas, lang, embedding, k) {
+    const langs = scopeLangs(lang);
+    const pre = this.pre.fastTop(embedding.fastDescriptor(canvas), langs, Math.max(this.prefilter, k));
+    if (!pre.length) return [];
+    const deepReady = await embedding.ensureModel();
+    if (!deepReady) return pre.slice(0, k).map(h => ({ ...this.pre.familyCandidate(h, langs), score: h.fast, fastScore: h.fast, embeddingVerified: false }));
+    const top = pre.slice(0, Math.max(this.rerank, k));
+    const [queryDeep] = await Promise.all([embedding.embed(canvas), this._deepBatch(top, embedding)]);
+    for (const h of top) h.deep = this.deepCache.get(`${h.lang}:${h.id}`) || null;
+    for (const h of top) {
+      h.deepScore = h.deep ? cosine(queryDeep, h.deep) : null;
+      h.score = h.deepScore == null ? h.fast * 0.82 : h.deepScore * 0.82 + h.fast * 0.18;
+    }
+    const verified = top.filter(h => h.deepScore != null).sort((a, b) => b.score - a.score);
+    return verified.slice(0, k).map(h => ({ ...this.pre.familyCandidate(h, langs), score: h.score, fastScore: h.fast, deepScore: h.deepScore, embeddingVerified: true }));
+  }
+
+  /** Deep embeddings for the uncached hits, images loaded in parallel and embedded in one batch. */
+  async _deepBatch(hits, embedding) {
+    const missing = hits.filter(h => !this.deepCache.has(`${h.lang}:${h.id}`));
+    if (!missing.length) return;
+    if (typeof embedding.embedBatch !== 'function') { await Promise.all(missing.map(h => this._deepFor(h, embedding))); return; }
+    const canvases = await Promise.all(missing.map(h => embedding.imageCanvas(this.pre.row(h.lang, h.row).image).catch(() => null)));
+    const ok = missing.filter((_, i) => canvases[i]);
+    if (!ok.length) return;
+    try {
+      const vecs = await embedding.embedBatch(canvases.filter(Boolean));
+      ok.forEach((h, i) => { if (vecs[i]) this.deepCache.set(`${h.lang}:${h.id}`, vecs[i]); });
+    } catch { await Promise.all(ok.map(h => this._deepFor(h, embedding))); }
+  }
+
+  async _deepFor(hit, embedding) {
+    const key = `${hit.lang}:${hit.id}`;
+    if (this.deepCache.has(key)) return this.deepCache.get(key);
+    if (!this.deepInFlight.has(key)) {
+      this.deepInFlight.set(key, (async () => {
+        try {
+          const image = this.pre.row(hit.lang, hit.row).image;
+          const vec = await embedding.embed(await embedding.imageCanvas(image));
+          if (vec) this.deepCache.set(key, vec);
+          return vec || null;
+        } catch { return null; } finally { this.deepInFlight.delete(key); }
+      })());
+    }
+    return this.deepInFlight.get(key);
+  }
+
   async warm(lang, embedding, { batch = 18, signal = null, concurrency = 6 } = {}) {
+    if (this.usesPrecomputed(lang)) return; // the full index is already on the device
     if (this.warming || this.count(lang) >= this.maxRefs) return;
+    if (lang === 'auto') lang = 'fr'; // legacy progressive warm is single-language
     this.warming = true;
     try {
       await this.load(lang);

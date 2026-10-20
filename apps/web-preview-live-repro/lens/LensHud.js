@@ -9,7 +9,7 @@
  * Presentation only: nothing here influences identity decisions.
  */
 
-export const LANG_NAMES = Object.freeze({ fr: 'français', en: 'anglais', ja: 'japonais' });
+export const LANG_NAMES = Object.freeze({ fr: 'français', en: 'anglais', ja: 'japonais', auto: 'toutes langues' });
 export const TONES = Object.freeze(['idle', 'work', 'attention', 'fail', 'locked']);
 
 const clamp01 = v => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
@@ -33,7 +33,11 @@ export function qualityProblem({ quality = null, geometryReason = null } = {}) {
   return null;
 }
 
-function indexHint({ indexCount = 0, indexTarget = 0, lang = 'fr' }) {
+function indexHint({ indexCount = 0, indexTarget = 0, lang = 'fr', indexDownload = null }) {
+  if (indexDownload && indexDownload.done < indexDownload.total) {
+    const p = clamp01((indexDownload.done + 0.35) / indexDownload.total);
+    return { text: `Téléchargement du catalogue visuel (${Math.round(p * 100)} %)`, progress: p };
+  }
   if (!indexTarget || indexCount >= indexTarget) return null;
   const fmt = n => new Intl.NumberFormat('fr-FR').format(n);
   return { text: `Préparation des cartes de référence (${LANG_NAMES[lang] || lang}) : ${fmt(indexCount)} sur ${fmt(indexTarget)}`, progress: clamp01(indexCount / indexTarget) };
@@ -43,7 +47,12 @@ function ambiguousHint(reason = '', lang = 'fr', idx = null) {
   if (reason.startsWith('candidate_lock_blocked')) {
     return 'Une réédition quasi identique existe et ne peut pas encore être distinguée. TCG Lens préfère ne pas trancher.';
   }
+  if (reason.startsWith('language_contradiction')) {
+    const l = reason.split(':')[1];
+    return `La carte semble être en ${LANG_NAMES[l] || l}, mais cette édition n’existe pas dans cette langue au catalogue. TCG Lens préfère ne pas trancher.`;
+  }
   if (reason.includes('contradiction') || reason.includes('collector_identifier_conflict')) {
+    if (lang === 'auto') return 'Le numéro lu ne correspond pas à l’image. Rendez le bas de la carte bien lisible.';
     return `Le numéro lu ne correspond pas à l’image. Vérifiez que la carte est bien en ${LANG_NAMES[lang] || lang}.`;
   }
   // While references are still loading, the true card may simply not be comparable yet.
@@ -71,6 +80,9 @@ export function describeHud(input = {}) {
   if (state === 'ERROR' || input.error) {
     return { tone: 'fail', key: 'error', title: 'Caméra indisponible', hint: input.error || 'Autorisez l’accès à la caméra dans les réglages du navigateur, puis réessayez.', progress: null, action: { id: 'retry-camera', label: 'Réessayer' } };
   }
+  if (input.cameraPending) {
+    return { tone: 'idle', key: 'camera-pending', title: 'Activation de la caméra', hint: 'Autorisez l’accès à la caméra si le navigateur le demande.', progress: idx ? idx.progress : null };
+  }
   if (state === 'LOCKED') return { tone: 'locked', key: 'locked', title: 'Carte identifiée', hint: null, progress: 1 };
   if (state === 'CHANGE_PENDING') return { tone: 'work', key: 'change', title: 'Nouvelle carte ?', hint: 'Gardez-la en place quelques instants pour confirmer.', progress: null };
   if (state === 'ACQUIRING' || !state) {
@@ -86,7 +98,7 @@ export function describeHud(input = {}) {
   if (state === 'UNKNOWN') {
     if (idx) return { tone: 'attention', key: 'unknown-index', title: 'Cartes de référence en préparation', hint: `${idx.text}. La reconnaissance s’améliore à mesure.`, progress: idx.progress };
     if (problem) return { tone: 'attention', key: `q-${problem.title}`, ...problem, progress: null };
-    return { tone: 'fail', key: 'unknown', title: 'Carte non reconnue', hint: `Vérifiez que la langue de scan correspond à la carte (${LANG_NAMES[lang] || lang}).`, progress: null };
+    return { tone: 'fail', key: 'unknown', title: 'Carte non reconnue', hint: lang === 'auto' ? 'Cette carte n’est pas encore au catalogue, ou l’image est trop différente. Essayez sous un autre angle.' : `Vérifiez que la langue de scan correspond à la carte (${LANG_NAMES[lang] || lang}).`, progress: null };
   }
 
   if (state === 'AMBIGUOUS' || kind === 'AMBIGUOUS') {
@@ -98,6 +110,9 @@ export function describeHud(input = {}) {
 
   if ((state === 'VERIFYING' || kind === 'VERIFY') && (input.verifyingMs || 0) > 6000) {
     return { tone: 'attention', key: 'verify-stuck', title: 'Numéro illisible', hint: 'Approchez le téléphone du bas de la carte : le numéro (par exemple 001/084) doit être net et sans reflet.', progress: 0.6 };
+  }
+  if ((state === 'VERIFYING' || kind === 'VERIFY') && decision?.reason === 'language_unresolved') {
+    return { tone: 'work', key: 'verify-lang', title: 'Lecture de la langue', hint: 'Cette carte existe en plusieurs langues : gardez le texte de la carte lisible.', progress: 0.8 };
   }
   if (state === 'VERIFYING' || kind === 'VERIFY') {
     const ocr = clamp01((input.ocrExactVotes || 0) / (input.requiredOcrVotes || 2));

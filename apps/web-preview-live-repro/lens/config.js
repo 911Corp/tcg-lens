@@ -12,9 +12,9 @@ export const LENS_STATES = Object.freeze({
 
 export const DEFAULT_POLICY = Object.freeze({
   detectorIntervalMs: 125,
-  visualIntervalMs: 520,
+  visualIntervalMs: 300,
   lockedVisualIntervalMs: 1150,
-  ocrIntervalMs: 2600,
+  ocrIntervalMs: 1600,
   ocrExactVotes: 2,
   ocrNameVotes: 2,
   ocrMaxObservations: 5,
@@ -27,6 +27,9 @@ export const DEFAULT_POLICY = Object.freeze({
   topK: 6,
   provisionalVisualScore: 0.84,
   lockVisualScore: 0.94,
+  // v0.3.2: with a 2-read exact printed number + total consensus on the visual top, the visual
+  // score bar is lowered (camera vs catalogue scan); margin, votes and quality bars are unchanged.
+  lockVisualScoreWithPrinting: 0.9,
   lockVisualMargin: 0.06,
   lockMinAverageQuality: 0.46,
   visualOnlyScore: 0.965,
@@ -43,6 +46,7 @@ export const DEFAULT_POLICY = Object.freeze({
   maxIndexRefs: 1200,
   warmBatch: 18,
   rectifiedWidth: 224,
+  ocrRectifiedWidth: 640,
   cardAspect: 63 / 88,
 });
 

@@ -1,4 +1,4 @@
-const CACHE='tcg-lens-shell-v6';
+const CACHE='tcg-lens-shell-v7';
 const SHELL=['/','/index.html','/styles.css','/app-1.js','/app-2.js','/app-3.js','/app-4.js','/app-shell.js','/lens/index.js','/manifest.json','/icon.svg','/fonts/barlow-semi-condensed-latin-600-normal.woff2','/fonts/barlow-semi-condensed-latin-700-normal.woff2','/fonts/barlow-latin-400-normal.woff2','/fonts/barlow-latin-500-normal.woff2'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)))});
 self.addEventListener('activate',event=>{self.clients.claim();event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))))});

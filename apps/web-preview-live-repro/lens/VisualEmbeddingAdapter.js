@@ -78,10 +78,34 @@ export class VisualEmbeddingAdapter {
     } finally { tensor?.dispose?.(); }
   }
 
+  /**
+   * Batch embedding of several reference canvases in one model call (much faster than N calls on
+   * both WebGL and CPU backends). Same values as embed(): bilinear resize commutes with the model's
+   * affine normalisation, and alignCorners matches mobilenet's own resize.
+   */
+  async embedBatch(canvases) {
+    if (!canvases.length) return [];
+    if (!(await this.ensureModel())) return canvases.map(() => null);
+    const tf = window.tf;
+    let out = null;
+    try {
+      out = tf.tidy(() => this.model.infer(tf.stack(canvases.map(c => tf.image.resizeBilinear(tf.cast(tf.browser.fromPixels(c), 'float32'), [224, 224], true))), true));
+      const data = await out.data();
+      const dims = data.length / canvases.length;
+      return canvases.map((_, i) => normalize(data.subarray(i * dims, (i + 1) * dims)));
+    } finally { out?.dispose?.(); }
+  }
+
   async imageCanvas(url, width = 224, height = 312) {
-    const img = new Image(); img.crossOrigin = 'anonymous'; img.decoding = 'async';
-    const src = url.includes('assets.tcgdex.net') ? `/api/visual-image?url=${encodeURIComponent(url)}` : url;
-    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = src; });
+    // TCGdex serves images with CORS from its CDN: load directly (fast, cached), and fall back to
+    // the same-origin proxy only if the direct load fails.
+    const load = src => new Promise((resolve, reject) => {
+      const img = new Image(); img.crossOrigin = 'anonymous'; img.decoding = 'async';
+      img.onload = () => resolve(img); img.onerror = reject; img.src = src;
+    });
+    let img;
+    try { img = await load(url); }
+    catch (error) { if (!url.includes('assets.tcgdex.net')) throw error; img = await load(`/api/visual-image?url=${encodeURIComponent(url)}`); }
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     canvas.getContext('2d').drawImage(img, 0, 0, width, height);
     return canvas;

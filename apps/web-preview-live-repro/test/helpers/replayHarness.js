@@ -7,6 +7,7 @@ import { EvidenceFusion } from '../../lens/EvidenceFusion.js';
 import { LensStateMachine } from '../../lens/LensStateMachine.js';
 import { ChangeDetector } from '../../lens/ChangeDetector.js';
 import { OCRConsensus } from '../../lens/OCRConsensus.js';
+import { LanguageConsensus } from '../../lens/LanguageEvidence.js';
 
 export const replaySegments = Object.freeze([
   { startMs: 0, endMs: 5067, expectedCandidateId: 'test-a', label: 'A1' },
@@ -25,7 +26,9 @@ export function expectedIdentityAtMs(t) {
 // visualOnlyLockAllowed models the candidate-pool flag (v0.3.1). The original A->empty->B->A
 // scenarios model references from a VISUAL_COMPLETE, released set, hence the default `true`.
 // ocrRead lets a scenario inject a raw printed-metadata read for the visual top (contradiction tests).
-export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null, lockBlockedReason = null } = {}) {
+// languages/langRead (v0.3.2 auto-language): the visual top is a family present in `languages`;
+// langRead({candidateId, t}) returns the language read from printed text on each OCR pass.
+export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, ocrRead = null, lockBlockedReason = null, languages = null, langRead = null, autoLanguage = true } = {}) {
   const policy = { ...DEFAULT_POLICY };
   const events = [];
   let now = 0;
@@ -60,6 +63,8 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
         maxObservations: policy.ocrMaxObservations,
       }),
       lastOcrAt: 0,
+      lastLangAt: 0,
+      langConsensus: new LanguageConsensus({ singleLanguageReads: autoLanguage ? 1 : 0 }),
       lastVisualAt: 0,
       locked: null,
       changeDetector: new ChangeDetector({
@@ -129,7 +134,15 @@ export function runReplay({ corroborateB = false, visualOnlyLockAllowed = true, 
     context.lastVisualAt = now;
     const id = row.top === 'a' ? 'test-a' : 'test-b';
     const candidate = { id, score: row.score, margin: row.margin, embeddingVerified: true };
-    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8 };
+    if (languages && langRead && !context.locked && now - context.lastLangAt >= policy.ocrIntervalMs) {
+      context.lastLangAt = now;
+      const lang = langRead({ candidateId: id, t: now });
+      context.langConsensus.observe(id, lang, languages);
+      events.push({ t: now, type: 'LANGUAGE_READ', candidateId: id, lang, resolved: context.langConsensus.resolved(id, languages) });
+    }
+    const resolvedLang = languages ? context.langConsensus.resolved(id, languages) : null;
+    const languageContradiction = languages ? context.langConsensus.contradicted(id, languages) : null;
+    context.visualEvidence = { candidateId: id, score: row.score, margin: row.margin, embeddingVerified: true, visualOnlyLockAllowed, lockBlockedReason, quality: 0.8, languages, resolvedLang, languageContradiction };
     const temporal = context.consensus.observe({ candidateId: id, score: row.score, margin: row.margin, quality: 0.8, at: now });
     events.push({ t: now, type: 'VISUAL', candidateId: id, score: row.score, margin: row.margin, temporalActive: temporal.activeCandidateId, temporalAction: temporal.lastAction, temporalEpoch: temporal.epoch, locked: context.locked?.id || null });
     if (!context.locked && corroborateB && id === 'test-b' && temporal.top?.candidateId === 'test-b' && temporal.top.votes >= 4 && now - context.lastOcrAt >= policy.ocrIntervalMs) {

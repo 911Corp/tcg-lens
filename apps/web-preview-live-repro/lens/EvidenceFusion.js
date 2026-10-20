@@ -7,7 +7,25 @@ export class EvidenceFusion {
     this.contradictions = new ContradictionEngine();
   }
 
-  evaluate({ temporal, visual, ocr = null, barcode = null, canonical = null }) {
+  /**
+   * v0.3.2 auto-language: a printing family present in several languages (FR/EN share artwork)
+   * may only lock once its physical language is proven (`visual.resolvedLang`). Otherwise the lock
+   * is held as VERIFY: identity of the printing, including language, is never guessed.
+   */
+  evaluate(input) {
+    const d = this._evaluate(input);
+    const v = input.visual || {};
+    if (d.decision === 'LOCK' && d.reason !== 'verified_barcode' && v.languageContradiction) {
+      // Printed text says the card is in a language this printing does not exist in.
+      return { decision: 'AMBIGUOUS', candidateId: null, confidence: 0, reason: `language_contradiction:${v.languageContradiction}` };
+    }
+    if (d.decision === 'LOCK' && d.reason !== 'verified_barcode' && (v.languages?.length || 0) > 0 && !v.resolvedLang) {
+      return { decision: 'VERIFY', candidateId: d.candidateId, confidence: Math.min(0.89, d.confidence), reason: 'language_unresolved', pendingLock: d.reason };
+    }
+    return d;
+  }
+
+  _evaluate({ temporal, visual, ocr = null, barcode = null, canonical = null }) {
     if (barcode?.verified && barcode.candidateId) {
       return { decision: 'LOCK', candidateId: barcode.candidateId, confidence: 0.995, reason: 'verified_barcode' };
     }
@@ -64,7 +82,8 @@ export class EvidenceFusion {
       return { decision: 'CONTINUE', candidateId, confidence: 0, reason: 'frame_quality_insufficient_for_lock' };
     }
 
-    if (votesOk && scoreOk && marginOk && qualityOk && ocrPrintingSupports) {
+    const printingScoreOk = top.avgScore >= (p.lockVisualScoreWithPrinting ?? p.lockVisualScore) && visual.embeddingVerified === true;
+    if (votesOk && printingScoreOk && marginOk && qualityOk && ocrPrintingSupports) {
       const confidence = Math.min(0.995, 0.72 + top.avgScore * 0.16 + top.avgMargin * 0.6 + Math.min(top.votes, 6) * 0.012);
       return {
         decision: 'LOCK', candidateId, confidence, reason: 'visual_temporal_plus_exact_collector',

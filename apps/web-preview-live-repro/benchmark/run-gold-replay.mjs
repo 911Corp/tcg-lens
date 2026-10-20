@@ -22,9 +22,9 @@ const scenarios = [
   {
     id: 'incomplete-set-locks-only-with-printed-number-consensus',
     run: () => runReplay({ visualOnlyLockAllowed: false, ocrRead: ({ candidateId }) => ({ candidateId, collectorExact: true, strongNameMatch: true, contradiction: false }) }),
-    // 2-read OCR consensus at ocrIntervalMs=2600 needs >= ~5.3 s of stable track; segment A1 (~5.0 s)
-    // is too short, so only B and A2 can lock. This latency cost must be measured on real devices.
-    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-b', 'test-a'] },
+    // v0.3.2: ocrIntervalMs 2600 -> 1600 lets the 2-read consensus complete within segment A1 too
+    // (v0.3.1 only locked B and A2). Real-device latency must still be measured.
+    requirements: { minSegmentCoverage: 1, lockSequence: ['test-a', 'test-b', 'test-a'] },
   },
   {
     id: 'unindexed-artwork-twin-never-locks-even-with-ocr',
@@ -41,6 +41,43 @@ const scenarios = [
     id: 'printed-metadata-contradiction-blocks-extreme-visual',
     run: () => runReplay({ visualOnlyLockAllowed: true, ocrRead: () => ({ candidateId: null, contradiction: true }) }),
     requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  // v0.3.2 auto-language: FR and EN printings share the artwork; the language must be proven.
+  {
+    id: 'multi-language-family-never-locks-without-language-proof',
+    run: () => runReplay({ languages: ['fr', 'en'] }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
+    id: 'multi-language-family-locks-after-two-agreeing-language-reads',
+    run: () => runReplay({ languages: ['fr', 'en'], langRead: () => 'fr' }),
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
+  },
+  {
+    id: 'conflicting-language-reads-never-lock',
+    run: () => { let n = 0; return runReplay({ languages: ['fr', 'en'], langRead: () => (n++ % 2 ? 'en' : 'fr') }); },
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
+    // Japanese card whose artwork matches an English-only printing (JA twin absent from the index).
+    id: 'japanese-text-on-english-only-printing-never-locks',
+    run: () => runReplay({ languages: ['en'], langRead: () => 'ja' }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
+    id: 'japanese-printing-locks-with-japanese-reads',
+    run: () => runReplay({ languages: ['ja'], langRead: () => 'ja' }),
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
+  },
+  {
+    id: 'auto-scan-single-language-printing-waits-for-a-language-read',
+    run: () => runReplay({ languages: ['en'] }),
+    requirements: { minSegmentCoverage: 0, lockSequence: [] },
+  },
+  {
+    id: 'fixed-scan-language-needs-no-language-read',
+    run: () => runReplay({ languages: ['ja'], autoLanguage: false }),
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
   },
 ];
 

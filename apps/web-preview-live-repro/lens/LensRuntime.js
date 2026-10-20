@@ -20,6 +20,8 @@ import { Telemetry } from './Telemetry.js';
 import { createTrackToken, isTrackTokenCurrent, createIdentityToken, isIdentityTokenCurrent } from './IdentityGuard.js';
 import { ChangeDetector } from './ChangeDetector.js';
 import { HudView, describeHud } from './LensHud.js';
+import { detectCardLanguage, LanguageConsensus } from './LanguageEvidence.js';
+import { scopeLangs } from './ANNIndex.js';
 
 export class LensRuntime {
   constructor({ video, trackLayer, resultOverlay, hudRoot = null, statusPill = null, debugNode = null, policy = {} }) {
@@ -36,6 +38,8 @@ export class LensRuntime {
     this.detector = new CardDetector();
     this.tracker = new TrackManager(this.policy);
     this.rectifier = new PerspectiveRectifier({ width: this.policy.rectifiedWidth, aspect: this.policy.cardAspect });
+    // OCR reads small print (001/084, PV/HP): it gets its own high-resolution rectification.
+    this.ocrRectifier = new PerspectiveRectifier({ width: this.policy.ocrRectifiedWidth, aspect: this.policy.cardAspect });
     this.quality = new FrameQuality();
     this.bestFrame = new BestFrameSelector();
     this.embedding = new VisualEmbeddingAdapter();
@@ -50,7 +54,8 @@ export class LensRuntime {
     this.running = false;
     this.paused = false;
     this.frameHandle = null;
-    this.lang = 'fr';
+    this.lang = 'auto';
+    this.indexDownload = null; // { done, total } while the precomputed index downloads
     this.context = null;
     this.lastBarcodeAt = 0;
     this.barcodeInFlight = false;
@@ -59,16 +64,16 @@ export class LensRuntime {
 
   async start(stream) {
     this.stop({ keepCamera: true });
-    this.lang = window.TCGShell?.currentLang?.() || document.querySelector('#langSelect')?.value || this.lang || 'fr';
-    this.running = true; this.paused = false; this.cameraError = null;
+    // v0.3.2: scanning needs no language choice. 'auto' searches FR+EN+JA and proves the language.
+    this.lang = window.TCGShell?.scanLang?.() || this.lang || 'auto';
+    this.running = true; this.paused = false; this.cameraError = null; this.cameraPending = false;
     this.stateMachine.reset({ reason: 'camera_start' });
     this._hud(true);
     try {
       const dimensions = await this.camera.attach(stream);
       this.telemetry.emit('CAMERA_READY', dimensions);
-      await this.index.load(this.lang);
       this.embedding.ensureModel().then(ready => this.telemetry.emit('EMBEDDING_MODEL', { ready }));
-      this._warmIndex();
+      this._loadIndex();
       this._schedule();
       return true;
     } catch (error) {
@@ -78,6 +83,16 @@ export class LensRuntime {
       return false;
     }
   }
+
+  /** Download the visual index and the model before the camera is even granted. */
+  preload() {
+    this.lang = window.TCGShell?.scanLang?.() || this.lang || 'auto';
+    this.embedding.ensureModel().then(ready => this.telemetry.emit('EMBEDDING_MODEL', { ready }));
+    return this._loadIndex();
+  }
+
+  /** The camera permission prompt is open. */
+  markCameraPending() { this.cameraPending = true; this.cameraError = null; this._hud(true); }
 
   pause() { this.paused = true; this.camera.cancel(this.frameHandle); this.frameHandle = null; }
 
@@ -89,20 +104,47 @@ export class LensRuntime {
       : name === 'NotReadableError' ? 'La caméra est utilisée par une autre application. Fermez-la, puis réessayez.'
       : !window.isSecureContext ? 'La caméra nécessite une connexion sécurisée (HTTPS).'
       : 'La caméra n’a pas pu démarrer. Réessayez.';
+    this.cameraPending = false;
     this._hud(true);
   }
 
-  /** Switch scan language: the candidate pool is per language, so the track restarts. */
+  /** Switch scan scope ('auto' or one language): the track restarts. */
   async setLanguage(lang) {
-    if (!['fr', 'en', 'ja'].includes(lang) || lang === this.lang) return;
+    if (!['auto', 'fr', 'en', 'ja'].includes(lang) || lang === this.lang) return;
     this.lang = lang;
     this.telemetry.emit('LANGUAGE_CHANGED', { lang });
     this.tracker.reset(); this.context = null; this.bestFrame.reset(); this._renderTrack(null);
     this.marketOverlay.clear();
     this.stateMachine.reset({ reason: 'language_changed' });
-    await this.index.load(lang);
     this._hud(true);
-    if (this.running && !this.index.warming) { if (this.warmTimer) clearTimeout(this.warmTimer); this._warmIndex(); }
+    if (this.running) await this._loadIndex();
+  }
+
+  /**
+   * Precomputed visual index first (whole catalogue in one download, instant search). The legacy
+   * progressive warm is only a fallback when the precomputed files are unavailable.
+   */
+  _loadIndex() {
+    const lang = this.lang;
+    if (this.index.usesPrecomputed(lang)) { this.indexDownload = null; return Promise.resolve(); }
+    if (this.indexLoading?.lang !== lang) this.indexLoading = { lang, promise: this._doLoadIndex(lang).finally(() => { if (this.indexLoading?.lang === lang) this.indexLoading = null; }) };
+    return this.indexLoading.promise;
+  }
+
+  async _doLoadIndex(lang) {
+    const langs = scopeLangs(lang);
+    this.indexDownload = { done: langs.filter(l => this.index.pre.isLoaded(l)).length, total: langs.length };
+    this._hud(true);
+    const ok = await this.index.loadPrecomputed(lang, () => {
+      if (this.lang !== lang) return;
+      this.indexDownload = { done: langs.filter(l => this.index.pre.isLoaded(l)).length, total: langs.length };
+      this._hud(true);
+    });
+    if (this.lang !== lang) return;
+    this.indexDownload = null;
+    this.telemetry.emit('INDEX_READY', { precomputed: ok, refs: this.index.count(lang), error: ok ? null : this.index.preError });
+    if (!ok) { await this.index.load(lang === 'auto' ? 'fr' : lang); if (this.running && !this.index.warming) this._warmIndex(); }
+    this._hud(true);
   }
   resume() { if (!this.running) return; this.paused = false; this._schedule(); }
 
@@ -167,7 +209,7 @@ export class LensRuntime {
     const locked = Boolean(this.context.locked);
     const visualDue = at - this.context.lastVisualAt >= (locked ? this.policy.lockedVisualIntervalMs : this.policy.visualIntervalMs);
     if ((accepted || locked) && visualDue && quality.score >= this.policy.minQualityForVisual) this._launchVisual(track, accepted || { canvas: rectified, quality, generation: track.generation, at });
-    if (!locked && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, accepted?.canvas || this.bestFrame.best?.canvas || rectified);
+    if (!locked && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, this.ocrRectifier.rectify(this.video, track.quad) || accepted?.canvas || this.bestFrame.best?.canvas || rectified);
     this._maybeBarcode(at);
     this._hud();
   }
@@ -195,6 +237,8 @@ export class LensRuntime {
         votesRequired: this.policy.changeVotes,
       }),
       lastQuality: null,
+      // Automatic scan: even a single-language printing needs one agreeing printed-language read.
+      langConsensus: new LanguageConsensus({ singleLanguageReads: this.lang === 'auto' ? 1 : 0 }),
     };
     this.bestFrame.reset();
     if (resetState) this.stateMachine.reset({ reason, generation: track.generation, trackId: track.id });
@@ -216,7 +260,7 @@ export class LensRuntime {
       const top = candidates[0], second = candidates[1];
       const margin = top.score - (second?.score ?? 0);
       const previousVisualCandidateId = c.visualEvidence?.candidateId || null;
-      c.visualEvidence = { candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true, visualOnlyLockAllowed: top.visualOnlyLockAllowed === true, lockBlockedReason: top.lockBlockedReason || null, quality: frame.quality.score };
+      c.visualEvidence = this._visualEvidence(c, top, margin, frame.quality.score);
       const temporal = c.consensus.observe({ candidateId: top.id, score: top.score, margin, quality: frame.quality.score });
       if (c.ocrEpoch !== temporal.epoch) {
         this._resetOcrEvidence(c, { reason: 'temporal_epoch_changed', temporalEpoch: temporal.epoch });
@@ -242,6 +286,31 @@ export class LensRuntime {
     } finally { if (this._isCurrent(token)) c.visualInFlight = false; }
   }
 
+  /**
+   * Visual evidence for the top printing family. Once the physical language is proven, lock
+   * policy (visual-only permission, artwork-twin block) comes from that language's printing.
+   */
+  _visualEvidence(c, top, margin, quality) {
+    const languages = top.languages?.length ? top.languages : [top.lang || this.lang];
+    const resolvedLang = c.langConsensus.resolved(top.id, languages);
+    const row = (resolvedLang && top.byLang?.[resolvedLang]) || top;
+    return {
+      candidateId: top.id, score: top.score, margin, embeddingVerified: top.embeddingVerified === true,
+      visualOnlyLockAllowed: row.visualOnlyLockAllowed === true, lockBlockedReason: row.lockBlockedReason || null,
+      languages, resolvedLang, languageContradiction: c.langConsensus.contradicted(top.id, languages), quality,
+    };
+  }
+
+  _observeLanguage(c, evidence, candidateId) {
+    const top = c.visualCandidates.find(x => x.id === candidateId);
+    if (!top || !evidence?.available) return;
+    const languages = top.languages?.length ? top.languages : [top.lang || this.lang];
+    const read = detectCardLanguage(evidence.text, top, evidence.script);
+    const resolved = c.langConsensus.observe(top.id, read.lang, languages);
+    this.telemetry.emit('LANGUAGE_READ', { candidateId, read: read.lang, scores: read.scores, resolved });
+    if (c.visualEvidence?.candidateId === top.id) c.visualEvidence = this._visualEvidence(c, top, c.visualEvidence.margin, c.visualEvidence.quality);
+  }
+
   async _launchOcr(track, canvas) {
     const c = this.context; if (!c || c.ocrInFlight || c.generation !== track.generation || c.locked) return;
     const token = this._identityToken();
@@ -257,6 +326,7 @@ export class LensRuntime {
     try {
       this.telemetry.emit('OCR_START', token);
       const evidence = await this.ocr.analyze(canvas, this.lang, c.visualCandidates);
+      evidence.text = evidence.text || '';
       // Targeted warming is global (index-level) and identity-neutral, so it runs even if this
       // OCR result turns out to be stale for the current track.
       if (evidence?.lookupItems?.length) this._warmTargeted(evidence.lookupItems);
@@ -268,6 +338,7 @@ export class LensRuntime {
         });
         return;
       }
+      this._observeLanguage(c, evidence, token.candidateId);
       const consensusEvidence = c.ocrConsensus.observe(evidence, token.candidateId);
       c.ocrEvidence = consensusEvidence;
       this.telemetry.emit('OCR_RESULT', {
@@ -320,7 +391,11 @@ export class LensRuntime {
       this.telemetry.emit('LOCK_REJECTED_STATE', { ...detail, state: this.stateMachine.state });
       return false;
     }
-    const identity = { ...candidate, lang: candidate.lang || this.lang };
+    // The locked printing is the row of the proven language (never a guessed one).
+    const resolved = c.visualEvidence?.candidateId === candidate.id ? c.visualEvidence.resolvedLang : null;
+    const row = (resolved && candidate.byLang?.[resolved]) || (candidate.languages?.length === 1 && candidate.byLang?.[candidate.languages[0]]) || candidate;
+    const { byLang, languages, ...printing } = row;
+    const identity = { ...printing, lang: printing.lang || (this.lang === 'auto' ? null : this.lang) };
     c.locked = { id: candidate.id, confidence: decision.confidence, identity };
     this.marketOverlay.showLocked(identity, decision.confidence);
     this._renderTrack(this.tracker.track);
@@ -441,6 +516,7 @@ export class LensRuntime {
     const model = describeHud({
       verifyingMs: c?.verifySince != null ? at - c.verifySince : 0,
       state: this.cameraError ? 'ERROR' : this.stateMachine.state,
+      cameraPending: Boolean(this.cameraPending),
       error: this.cameraError,
       decision: c?.lastDecision || null,
       quality: c?.lastQuality || null,
@@ -451,8 +527,9 @@ export class LensRuntime {
       minTemporalVotes: this.policy.minTemporalVotes,
       ocrExactVotes: c?.ocrEvidence?.exactVotes || 0,
       requiredOcrVotes: this.policy.ocrExactVotes,
-      indexCount: this.index.count(this.lang),
-      indexTarget: this.index.target(this.lang),
+      indexCount: this.indexDownload ? 0 : this.index.count(this.lang),
+      indexTarget: this.indexDownload ? 0 : this.index.target(this.lang),
+      indexDownload: this.indexDownload,
       lang: this.lang,
     });
     this.hud.render(model);
@@ -505,7 +582,7 @@ export class LensRuntime {
   }
 
   _warmTargeted(items) {
-    if (this.targetedWarmInFlight) return;
+    if (this.targetedWarmInFlight || this.index.usesPrecomputed(this.lang)) return; // whole catalogue already indexed
     this.targetedWarmInFlight = true;
     this.index.warmTargeted(items, this.lang, this.embedding)
       .then(added => { if (added.length) this.telemetry.emit('INDEX_TARGETED_WARM', { added: added.length, ids: added.slice(0, 6) }); })

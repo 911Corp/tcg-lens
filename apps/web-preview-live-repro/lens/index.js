@@ -24,6 +24,8 @@ window.TCGLiveLens = {
   stop: () => runtime?.stop(),
   setLanguage: lang => ensureRuntime().setLanguage(lang),
   cameraError: error => ensureRuntime().showCameraError(error),
+  cameraPending: () => ensureRuntime().markCameraPending(),
+  preload: () => ensureRuntime().preload(),
   manual: () => ensureRuntime().analyzeCurrentFrame(), // diagnostic/test only, not exposed in normal UI
   get runtime() { return runtime; },
 };
