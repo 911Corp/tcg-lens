@@ -14,7 +14,10 @@ SCOPE_ARGS=(); if [ -n "${VERCEL_SCOPE:-}" ]; then SCOPE_ARGS=(--scope "$VERCEL_
 cd "$APP"
 rm -rf .vercel
 npx --yes vercel@64.7.0 link --yes --project "$PROJECT" --token "$VERCEL_TOKEN" "${SCOPE_ARGS[@]}" >/dev/null
-URL="$(npx --yes vercel@64.7.0 deploy --prod --yes --token "$VERCEL_TOKEN" "${SCOPE_ARGS[@]}")"
+OUT="$(npx --yes vercel@64.7.0 deploy --prod --yes --token "$VERCEL_TOKEN" "${SCOPE_ARGS[@]}")"
+# Recent CLIs print JSON; older ones print the URL. Use the stable production alias when present.
+URL="$(printf '%s' "$OUT" | grep -oE 'Production URL: https://[^" ]+' | sed 's/Production URL: //' | tail -1)"
+[ -n "$URL" ] || URL="$(printf '%s' "$OUT" | grep -oE 'https://[a-z0-9.-]+\.vercel\.app' | tail -1)"
 echo "$URL"
 for path in / /api/visual-cards?lang=fr\&size=8 "/api/candidate-lookup?lang=en&number=199&total=165"; do
   printf '%s %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$URL$path")" "$path"
