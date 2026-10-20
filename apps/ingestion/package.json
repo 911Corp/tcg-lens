@@ -15,7 +15,8 @@
     "images:probe": "tsx src/image-probe.ts",
     "coverage:build": "tsx src/coverage-build.ts",
     "cardmarket:crosswalk": "tsx src/cardmarket-crosswalk-import.ts",
-    "test:v031-integration": "tsx test/v031-pipeline-postgres.integration.ts"
+    "test:v031-integration": "tsx test/v031-pipeline-postgres.integration.ts",
+    "tcgplayer:crosswalk": "tsx src/tcgplayer-crosswalk-import.ts"
   },
   "dependencies": {
     "pg": "^8.16.0"

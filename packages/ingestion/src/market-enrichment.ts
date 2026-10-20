@@ -31,7 +31,7 @@ export function decideCardmarketEnrichment(product: NormalizedCardmarketProduct,
     if (setMatches.length === 1) return { status: 'AUTO_MATCH', matches: setMatches, ruleId: 'CARDMARKET_NUMBER_NAME_SET_EXACT', confidence: 0.97 };
     if (setMatches.length > 1) return { status: 'CANDIDATE_MATCH', matches: setMatches, ruleId: 'CARDMARKET_MULTI_LANGUAGE_OR_SET_AMBIGUITY', confidence: 0.75 };
   }
-  if (nameCandidates.length === 1) return { status: 'AUTO_MATCH', matches: nameCandidates, ruleId: 'CARDMARKET_NUMBER_NAME_UNIQUE', confidence: 0.94 };
+  if (nameCandidates.length === 1) return { status: 'CANDIDATE_MATCH', matches: nameCandidates, ruleId: 'CARDMARKET_NUMBER_NAME_UNIQUE_NO_SET_AGREEMENT', confidence: 0.75 };
   if (nameCandidates.length > 1) return { status: 'CANDIDATE_MATCH', matches: nameCandidates, ruleId: 'CARDMARKET_AMBIGUOUS_PRODUCT', confidence: 0.7 };
   return { status: numberCandidates.length ? 'CANDIDATE_MATCH' : 'NEW_ENTITY', matches: numberCandidates, ruleId: numberCandidates.length ? 'CARDMARKET_NO_DETERMINISTIC_MATCH' : 'CARDMARKET_CANONICAL_GAP', confidence: numberCandidates.length ? 0.5 : 0.4 };
 }
@@ -48,7 +48,9 @@ export function decideTcgcsvEnrichment(product: NormalizedTcgcsvProduct, candida
   const setMatches = exactName.filter(c => setMatchesTcgcsv(c, product.groupName, product.groupAbbreviation));
   if (setMatches.length === 1) return { status: 'AUTO_MATCH', matches: setMatches, ruleId: 'TCGCSV_NUMBER_NAME_GROUP_EXACT', confidence: 0.98 };
   if (setMatches.length > 1) return { status: 'CANDIDATE_MATCH', matches: setMatches, ruleId: 'TCGCSV_GROUP_AMBIGUITY', confidence: 0.75 };
-  if (exactName.length === 1) return { status: 'AUTO_MATCH', matches: exactName, ruleId: 'TCGCSV_NUMBER_NAME_LANGUAGE_UNIQUE', confidence: 0.95 };
+  // v0.3.1: name + number + language without group/set agreement is not deterministic. On the real
+  // catalog 23% of such matches disagreed with TCGdex's asserted TCGplayer IDs.
+  if (exactName.length === 1) return { status: 'CANDIDATE_MATCH', matches: exactName, ruleId: 'TCGCSV_NUMBER_NAME_LANGUAGE_UNIQUE_NO_SET_AGREEMENT', confidence: 0.75 };
   if (exactName.length > 1) return { status: 'CANDIDATE_MATCH', matches: exactName, ruleId: 'TCGCSV_AMBIGUOUS_PRODUCT', confidence: 0.7 };
   return { status: candidates.length ? 'CANDIDATE_MATCH' : 'NEW_ENTITY', matches: candidates, ruleId: candidates.length ? 'TCGCSV_NO_DETERMINISTIC_MATCH' : 'TCGCSV_CANONICAL_GAP', confidence: candidates.length ? 0.5 : 0.4 };
 }

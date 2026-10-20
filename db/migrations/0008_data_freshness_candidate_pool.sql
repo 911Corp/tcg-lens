@@ -45,6 +45,11 @@ $$;
 CREATE INDEX IF NOT EXISTS card_printings_collector_match_idx
   ON card_printings (collector_number_match_key(collector_number_normalized));
 
+-- Reverse-lookup indexes needed by coverage audits and enrichment at full-catalog scale.
+CREATE INDEX IF NOT EXISTS external_identifiers_entity_idx ON external_identifiers(entity_id, source_id, namespace);
+CREATE INDEX IF NOT EXISTS source_assertions_entity_field_idx ON source_assertions(entity_id, field_path);
+CREATE INDEX IF NOT EXISTS source_records_promoted_entity_idx ON source_records(promoted_entity_id) WHERE promoted_entity_id IS NOT NULL;
+
 -- Source-asserted variant attributes (TCGdex variants / variants_detailed). Assertions, not proof.
 ALTER TABLE card_variants
   ADD COLUMN IF NOT EXISTS source_variant_id text NULL,
@@ -87,11 +92,17 @@ CREATE TABLE IF NOT EXISTS visual_index_entries (
   eligible boolean NOT NULL,
   exclusion_reason text NULL,
   visual_only_lock_allowed boolean NOT NULL DEFAULT false,
+  lock_blocked_reason text NULL,
+  artwork_twin_count integer NOT NULL DEFAULT 0,
   descriptor vector NULL,
   PRIMARY KEY (build_id, entity_id),
   CHECK (eligible OR exclusion_reason IS NOT NULL),
   CHECK (NOT visual_only_lock_allowed OR eligible)
 );
+-- Columns added after the table first shipped in this migration (keeps re-application idempotent).
+ALTER TABLE visual_index_entries
+  ADD COLUMN IF NOT EXISTS lock_blocked_reason text NULL,
+  ADD COLUMN IF NOT EXISTS artwork_twin_count integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS visual_index_entries_pool_idx
   ON visual_index_entries(build_id, language_code, eligible);
 

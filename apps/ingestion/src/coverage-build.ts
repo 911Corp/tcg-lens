@@ -19,6 +19,8 @@ import {
   CATALOG_POLICY_VERSION,
   DEFAULT_READINESS_THRESHOLDS,
   READINESS_ORDER,
+  applyArtworkTwinPolicy,
+  artworkTwinKey,
   computeSetReadiness,
   decidePrintingEligibility,
   releaseStatus,
@@ -46,6 +48,7 @@ interface PrintingFact {
   language_code: string;
   tcgdex_card_id: string | null;
   name: string;
+  illustrator: string | null;
   collector_number_raw: string;
   collector_number_normalized: string;
   active_canonical: boolean;
@@ -84,53 +87,71 @@ const pool = new Pool({ connectionString: databaseUrl });
 const client = await pool.connect();
 try {
   const sets = (await client.query(
-    `SELECT cs.entity_id AS set_id, cs.language_code, cs.official_set_code, cs.official_name, cs.official_abbreviation,
+    `WITH quarantined AS (
+       SELECT cp2.set_id, count(*)::int AS n
+         FROM source_records sr JOIN card_printings cp2 ON cp2.entity_id=sr.promoted_entity_id
+        WHERE sr.promotion_status='QUARANTINED' GROUP BY cp2.set_id)
+     SELECT cs.entity_id AS set_id, cs.language_code, cs.official_set_code, cs.official_name, cs.official_abbreviation,
             cs.series_external_id, cs.series_name, to_char(cs.release_date,'YYYY-MM-DD') AS release_date,
             cs.release_status_override, cs.product_medium, cs.printed_card_count, cs.total_card_count, cs.source_expected_card_count,
-            (SELECT count(*)::int FROM source_records sr
-               JOIN card_printings cp2 ON cp2.entity_id=sr.promoted_entity_id
-              WHERE cp2.set_id=cs.entity_id AND sr.promotion_status='QUARANTINED') AS quarantined
+            COALESCE(q.n, 0) AS quarantined
        FROM card_sets cs
-       JOIN catalog_entities ce ON ce.entity_id=cs.entity_id AND ce.status='ACTIVE'`
+       JOIN catalog_entities ce ON ce.entity_id=cs.entity_id AND ce.status='ACTIVE'
+       LEFT JOIN quarantined q ON q.set_id=cs.entity_id`
   )).rows as SetRow[];
 
+  // Set-based aggregation (no per-printing correlated subqueries; scales to the full catalog).
   const facts = (await client.query(
-    `WITH cm AS (SELECT source_id FROM data_sources WHERE source_code='cardmarket'),
-          tp AS (SELECT source_id FROM data_sources WHERE source_code='tcgplayer'),
-          td AS (SELECT source_id FROM data_sources WHERE source_code='tcgdex'),
+    `WITH src AS (SELECT source_code, source_id FROM data_sources WHERE source_code IN ('tcgdex','cardmarket','tcgplayer')),
+          td AS (SELECT source_id FROM src WHERE source_code='tcgdex'),
           -- Identity conflicts only. Market-mapping conflicts (EXTERNAL_ID_COLLISION from marketplace
           -- enrichment, MARKET_*) must never remove a printing from the identity candidate pool.
           open_conflicts AS (SELECT DISTINCT unnest(entity_ids) AS entity_id FROM data_conflicts
-                              WHERE status='OPEN' AND conflict_type NOT LIKE 'MARKET\_%' AND conflict_type <> 'EXTERNAL_ID_COLLISION'),
+                              WHERE status='OPEN' AND conflict_type NOT LIKE 'MARKET\\_%' AND conflict_type <> 'EXTERNAL_ID_COLLISION'),
           market_conflicts AS (SELECT DISTINCT unnest(entity_ids) AS entity_id FROM data_conflicts
-                              WHERE status='OPEN' AND (conflict_type LIKE 'MARKET\_%' OR conflict_type = 'EXTERNAL_ID_COLLISION'))
-     SELECT cp.entity_id, cp.set_id, cs.language_code, cp.name, cp.collector_number_raw, cp.collector_number_normalized,
-            (SELECT ei.external_value FROM external_identifiers ei, td WHERE ei.entity_id=cp.entity_id AND ei.source_id=td.source_id AND ei.namespace='cards' LIMIT 1) AS tcgdex_card_id,
+                              WHERE status='OPEN' AND (conflict_type LIKE 'MARKET\\_%' OR conflict_type = 'EXTERNAL_ID_COLLISION')),
+          ext AS (
+            SELECT ei.entity_id,
+                   min(ei.external_value) FILTER (WHERE s.source_code='tcgdex' AND ei.namespace='cards') AS tcgdex_card_id,
+                   array_agg(DISTINCT ei.external_value) FILTER (WHERE s.source_code='cardmarket' AND ei.namespace='products' AND ei.verified) AS cardmarket_verified,
+                   array_agg(DISTINCT ei.external_value) FILTER (WHERE s.source_code='tcgplayer' AND ei.namespace='products' AND ei.verified) AS tcgplayer_verified
+              FROM external_identifiers ei JOIN src s ON s.source_id=ei.source_id
+             GROUP BY ei.entity_id),
+          variants AS (
+            SELECT cv.printing_id AS entity_id, count(DISTINCT cv.entity_id)::int AS variant_count,
+                   array_agg(DISTINCT sa.value_json #>> '{}') FILTER (WHERE sa.field_path='tcgdex_asserted_cardmarket_product_id') AS cardmarket_asserted,
+                   array_agg(DISTINCT sa.value_json #>> '{}') FILTER (WHERE sa.field_path='tcgdex_asserted_tcgplayer_product_id') AS tcgplayer_asserted
+              FROM card_variants cv
+              LEFT JOIN source_assertions sa ON sa.entity_id=cv.entity_id AND sa.status='ACTIVE'
+                   AND sa.field_path IN ('tcgdex_asserted_cardmarket_product_id','tcgdex_asserted_tcgplayer_product_id')
+             GROUP BY cv.printing_id),
+          priced AS (
+            SELECT DISTINCT entity_id FROM market_observations
+             WHERE observed_at >= ($1::date - ($2::text || ' days')::interval) AND observed_at < ($1::date + interval '1 day')),
+          ref_image AS (
+            SELECT DISTINCT ON (ei.entity_id) ei.entity_id, io.image_origin_id, io.source_url
+              FROM entity_images ei JOIN image_origins io ON io.image_id=ei.image_id JOIN td ON td.source_id=io.source_id
+             WHERE ei.role='REFERENCE'
+             ORDER BY ei.entity_id, io.first_seen_at)
+     SELECT cp.entity_id, cp.set_id, cs.language_code, cp.name, cp.illustrator, cp.collector_number_raw, cp.collector_number_normalized,
+            ext.tcgdex_card_id,
             (ce.status='ACTIVE' AND ce.resolution_state='CANONICAL') AS active_canonical,
-            EXISTS (SELECT 1 FROM open_conflicts oc WHERE oc.entity_id=cp.entity_id) AS has_open_conflict,
-            EXISTS (SELECT 1 FROM market_conflicts mc WHERE mc.entity_id=cp.entity_id) AS has_market_conflict,
-            (SELECT count(*)::int FROM card_variants cv WHERE cv.printing_id=cp.entity_id) AS variant_count,
-            img.image_origin_id, img.source_url AS image_url, ip.ok AS probe_ok, ip.http_status AS probe_status,
-            (SELECT array_agg(DISTINCT ei.external_value) FROM external_identifiers ei, cm WHERE ei.entity_id=cp.entity_id AND ei.source_id=cm.source_id AND ei.namespace='products' AND ei.verified) AS cardmarket_verified,
-            (SELECT array_agg(DISTINCT ei.external_value) FROM external_identifiers ei, tp WHERE ei.entity_id=cp.entity_id AND ei.source_id=tp.source_id AND ei.namespace='products' AND ei.verified) AS tcgplayer_verified,
-            (SELECT array_agg(DISTINCT sa.value_json #>> '{}') FROM card_variants cv JOIN source_assertions sa ON sa.entity_id=cv.entity_id
-              WHERE cv.printing_id=cp.entity_id AND sa.field_path='tcgdex_asserted_cardmarket_product_id' AND sa.status='ACTIVE') AS cardmarket_asserted,
-            (SELECT array_agg(DISTINCT sa.value_json #>> '{}') FROM card_variants cv JOIN source_assertions sa ON sa.entity_id=cv.entity_id
-              WHERE cv.printing_id=cp.entity_id AND sa.field_path='tcgdex_asserted_tcgplayer_product_id' AND sa.status='ACTIVE') AS tcgplayer_asserted,
-            EXISTS (SELECT 1 FROM market_observations mo
-                     WHERE mo.entity_id=cp.entity_id
-                       AND mo.observed_at >= ($1::date - ($2::text || ' days')::interval)
-                       AND mo.observed_at < ($1::date + interval '1 day')) AS priced
+            (oc.entity_id IS NOT NULL) AS has_open_conflict,
+            (mc.entity_id IS NOT NULL) AS has_market_conflict,
+            COALESCE(v.variant_count, 0) AS variant_count,
+            ri.image_origin_id, ri.source_url AS image_url, ip.ok AS probe_ok, ip.http_status AS probe_status,
+            ext.cardmarket_verified, ext.tcgplayer_verified, v.cardmarket_asserted, v.tcgplayer_asserted,
+            (pr.entity_id IS NOT NULL) AS priced
        FROM card_printings cp
        JOIN card_sets cs ON cs.entity_id=cp.set_id
        JOIN catalog_entities ce ON ce.entity_id=cp.entity_id
-       LEFT JOIN LATERAL (
-         SELECT io.image_origin_id, io.source_url
-           FROM entity_images ei JOIN image_origins io ON io.image_id=ei.image_id, td
-          WHERE ei.entity_id=cp.entity_id AND ei.role='REFERENCE' AND io.source_id=td.source_id
-          ORDER BY io.first_seen_at LIMIT 1
-       ) img ON true
-       LEFT JOIN image_probes ip ON ip.image_origin_id=img.image_origin_id
+       LEFT JOIN ext ON ext.entity_id=cp.entity_id
+       LEFT JOIN variants v ON v.entity_id=cp.entity_id
+       LEFT JOIN open_conflicts oc ON oc.entity_id=cp.entity_id
+       LEFT JOIN market_conflicts mc ON mc.entity_id=cp.entity_id
+       LEFT JOIN priced pr ON pr.entity_id=cp.entity_id
+       LEFT JOIN ref_image ri ON ri.entity_id=cp.entity_id
+       LEFT JOIN image_probes ip ON ip.image_origin_id=ri.image_origin_id
       WHERE ce.status <> 'MERGED'`,
     [asOf, String(PRICE_FRESHNESS_DAYS)]
   )).rows as PrintingFact[];
@@ -189,6 +210,24 @@ try {
     setResults.set(set.set_id, { set, status, metrics, readiness: r.readiness, identityVisualReadiness: r.identityVisualReadiness, blockers, ratios: r.ratios, missingImages });
   }
 
+  // Upcoming sets already listed by external sources (e.g. TCGplayer groups via TCGCSV). Products of
+  // these groups are never promoted to canonical printings and never enter the live pool.
+  const externalUpcoming = (await client.query(
+    `SELECT sr.scope_language_code AS lang, sr.external_key AS group_id, sr.normalized_payload->>'name' AS name,
+            sr.normalized_payload->>'abbreviation' AS abbreviation, left(sr.normalized_payload->>'publishedOn',10) AS published_on,
+            (SELECT count(*)::int FROM source_records p WHERE p.source_id=sr.source_id AND p.namespace='products'
+                AND p.scope_language_code=sr.scope_language_code AND (p.normalized_payload->>'groupId')=sr.external_key) AS products_staged,
+            (SELECT count(*)::int FROM source_records p WHERE p.source_id=sr.source_id AND p.namespace='products'
+                AND p.scope_language_code=sr.scope_language_code AND (p.normalized_payload->>'groupId')=sr.external_key
+                AND p.promotion_status='CANONICAL' AND EXISTS (SELECT 1 FROM card_printings cp WHERE cp.entity_id=p.promoted_entity_id)) AS printings_promoted,
+            (SELECT count(*)::int FROM source_records p WHERE p.source_id=sr.source_id AND p.namespace='products'
+                AND p.scope_language_code=sr.scope_language_code AND (p.normalized_payload->>'groupId')=sr.external_key
+                AND p.promotion_status='CANONICAL' AND EXISTS (SELECT 1 FROM sealed_products sp WHERE sp.entity_id=p.promoted_entity_id)) AS sealed_promoted
+       FROM source_records sr JOIN data_sources ds ON ds.source_id=sr.source_id AND ds.source_code='tcgcsv'
+      WHERE sr.namespace='groups' AND left(sr.normalized_payload->>'publishedOn',10) > $1
+      ORDER BY published_on`, [asOf]
+  )).rows as Array<{ lang: string; group_id: string; name: string; abbreviation: string | null; published_on: string; products_staged: number; printings_promoted: number; sealed_promoted: number }>;
+
   // ---------------------------------------------------------------- DB writes
   await client.query('BEGIN');
   const build = await client.query(
@@ -203,7 +242,35 @@ try {
     id: string; entityId: string; name: string; localId: string; printedTotal: number | null; lang: string;
     setId: string | null; setName: string; setAbbreviation: string | null; releaseDate: string | null;
     image: string; setReadiness: Readiness; visualOnlyLockAllowed: boolean;
+    lockBlockedReason: string | null; artworkTwins: number;
   }
+  // Eligibility for every printing, then artwork-twin groups (same language + name + illustrator).
+  const eligibilityById = new Map<string, ReturnType<typeof decidePrintingEligibility>>();
+  for (const f of facts) {
+    const sr = setResults.get(f.set_id);
+    if (!sr) continue;
+    eligibilityById.set(f.entity_id, decidePrintingEligibility({
+      productMedium: sr.set.product_medium, releaseStatus: sr.status, entityActiveCanonical: f.active_canonical,
+      hasOpenConflict: f.has_open_conflict, imageProbeOk: f.probe_ok, hasReferenceImage: Boolean(f.image_origin_id), setIdentityVisualReadiness: sr.identityVisualReadiness, includePrerelease
+    }));
+  }
+  const twinGroups = new Map<string, PrintingFact[]>();
+  for (const f of facts) {
+    const sr = setResults.get(f.set_id);
+    if (!sr || sr.set.product_medium !== 'PHYSICAL' || !f.active_canonical) continue;
+    const key = artworkTwinKey({ languageCode: f.language_code, name: f.name, illustrator: f.illustrator });
+    if (!key) continue;
+    const list = twinGroups.get(key) ?? [];
+    list.push(f);
+    twinGroups.set(key, list);
+  }
+  const twinsOf = (f: PrintingFact) => {
+    const key = artworkTwinKey({ languageCode: f.language_code, name: f.name, illustrator: f.illustrator });
+    const group = key ? (twinGroups.get(key) ?? []).filter(x => x.entity_id !== f.entity_id) : [];
+    return { total: group.length, unindexed: group.filter(x => !eligibilityById.get(x.entity_id)?.inLivePool).length };
+  };
+  let lockBlockedCount = 0;
+
   const poolByLang = new Map<string, PoolItem[]>();
   const exclusionCounts = new Map<string, number>();
   let poolCount = 0, visualOnlyCount = 0;
@@ -213,11 +280,11 @@ try {
     const values: unknown[] = [];
     const tuples = entryBatch.map((row, i) => {
       values.push(...row);
-      const o = i * 8;
-      return `($${o + 1},$${o + 2},$${o + 3},$${o + 4},$${o + 5},$${o + 6},$${o + 7},$${o + 8})`;
+      const o = i * 10;
+      return `(${Array.from({ length: 10 }, (_, k) => `$${o + k + 1}`).join(',')})`;
     });
     await client.query(
-      `INSERT INTO visual_index_entries(build_id,entity_id,set_id,language_code,image_origin_id,eligible,exclusion_reason,visual_only_lock_allowed)
+      `INSERT INTO visual_index_entries(build_id,entity_id,set_id,language_code,image_origin_id,eligible,exclusion_reason,visual_only_lock_allowed,lock_blocked_reason,artwork_twin_count)
        VALUES ${tuples.join(',')}`, values
     );
     entryBatch.length = 0;
@@ -225,27 +292,28 @@ try {
   for (const f of facts) {
     const sr = setResults.get(f.set_id);
     if (!sr) continue;
-    const e = decidePrintingEligibility({
-      productMedium: sr.set.product_medium, releaseStatus: sr.status, entityActiveCanonical: f.active_canonical,
-      hasOpenConflict: f.has_open_conflict, imageProbeOk: f.probe_ok, hasReferenceImage: Boolean(f.image_origin_id), setIdentityVisualReadiness: sr.identityVisualReadiness, includePrerelease
-    });
-    entryBatch.push([buildId, f.entity_id, f.set_id, f.language_code, f.image_origin_id, e.inLivePool, e.inLivePool ? null : e.reason ?? 'UNSPECIFIED', e.visualOnlyLockAllowed]);
+    const e = eligibilityById.get(f.entity_id)!;
+    const twins = twinsOf(f);
+    const twin = applyArtworkTwinPolicy(e, twins);
+    if (twin.lockBlockedReason) lockBlockedCount++;
+    entryBatch.push([buildId, f.entity_id, f.set_id, f.language_code, f.image_origin_id, e.inLivePool, e.inLivePool ? null : e.reason ?? 'UNSPECIFIED', twin.visualOnlyLockAllowed, twin.lockBlockedReason, twins.total]);
     if (entryBatch.length >= 500) await flush();
     if (!e.inLivePool) { exclusionCounts.set(e.reason ?? 'UNSPECIFIED', (exclusionCounts.get(e.reason ?? 'UNSPECIFIED') ?? 0) + 1); continue; }
     poolCount++;
-    if (e.visualOnlyLockAllowed) visualOnlyCount++;
+    if (twin.visualOnlyLockAllowed) visualOnlyCount++;
     const list = poolByLang.get(f.language_code) ?? [];
     list.push({
       id: f.tcgdex_card_id ?? f.entity_id, entityId: f.entity_id, name: f.name, localId: f.collector_number_raw,
       printedTotal: sr.set.printed_card_count, lang: f.language_code, setId: sr.set.official_set_code, setName: sr.set.official_name,
       setAbbreviation: sr.set.official_abbreviation, releaseDate: sr.set.release_date,
-      image: `${(f.image_url as string).replace(/\/$/, '')}/low.webp`, setReadiness: sr.readiness, visualOnlyLockAllowed: e.visualOnlyLockAllowed
+      image: `${(f.image_url as string).replace(/\/$/, '')}/low.webp`, setReadiness: sr.readiness, visualOnlyLockAllowed: twin.visualOnlyLockAllowed,
+      lockBlockedReason: twin.lockBlockedReason, artworkTwins: twins.total
     });
     poolByLang.set(f.language_code, list);
   }
   await flush();
   await client.query(`UPDATE visual_index_builds SET stats=$2::jsonb WHERE build_id=$1`, [buildId, JSON.stringify({
-    printings: facts.length, inLivePool: poolCount, visualOnlyLockAllowed: visualOnlyCount, exclusions: Object.fromEntries(exclusionCounts)
+    printings: facts.length, inLivePool: poolCount, visualOnlyLockAllowed: visualOnlyCount, lockBlockedByUnindexedTwin: lockBlockedCount, exclusions: Object.fromEntries(exclusionCounts)
   })]);
 
   const coverage = await client.query(
@@ -284,10 +352,12 @@ try {
       },
       allCanonicalPrintings: sum('canonicalPrintings'),
       livePool: poolByLang.get(lang)?.length ?? 0,
-      livePoolVisualOnlyLockAllowed: (poolByLang.get(lang) ?? []).filter(x => x.visualOnlyLockAllowed).length
+      livePoolVisualOnlyLockAllowed: (poolByLang.get(lang) ?? []).filter(x => x.visualOnlyLockAllowed).length,
+      livePoolLockBlocked: (poolByLang.get(lang) ?? []).filter(x => x.lockBlockedReason).length
     };
   }
-  summary.livePool = { total: poolCount, visualOnlyLockAllowed: visualOnlyCount, exclusions: Object.fromEntries(exclusionCounts) };
+  summary.externalUpcomingSets = externalUpcoming;
+  summary.livePool = { total: poolCount, visualOnlyLockAllowed: visualOnlyCount, lockBlockedByUnindexedTwin: lockBlockedCount, exclusions: Object.fromEntries(exclusionCounts) };
   await client.query(`UPDATE coverage_runs SET summary=$2::jsonb WHERE coverage_run_id=$1`, [coverageRunId, JSON.stringify(summary)]);
   await client.query('COMMIT');
 
@@ -330,6 +400,15 @@ try {
   md.push('', `## Latest physical sets (released since ${recentCutoff}, plus staged)`, '', '| Lang | Set | Name | Release | Status | Readiness | Printings/expected | Images OK | CM | TP | Priced | Blockers |', '|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const r of setRows.filter(r => r.set.product_medium === 'PHYSICAL' && ((r.set.release_date ?? '') >= recentCutoff || r.status !== 'RELEASED'))) {
     md.push(`| ${r.set.language_code} | ${r.set.official_set_code} | ${r.set.official_name} | ${r.set.release_date ?? '?'} | ${r.status} | **${r.readiness}** | ${r.metrics.canonicalPrintings}/${r.metrics.expectedCards ?? '?'} | ${pct(r.ratios.imagesOk)} | ${pct(r.ratios.cardmarket)} | ${pct(r.ratios.tcgplayer)} | ${pct(r.ratios.priced)} | ${r.blockers.slice(0, 4).join('; ')} |`);
+  }
+  md.push('', '## Upcoming sets listed by external sources (staged, excluded from the live pool)', '', '| Lang | Source group | Name | Abbrev. | Release | Products staged | Card printings promoted | Sealed products catalogued |', '|---|---|---|---|---|---|---|---|');
+  for (const u of externalUpcoming) md.push(`| ${u.lang} | tcgplayer:${u.group_id} | ${u.name} | ${u.abbreviation ?? ''} | ${u.published_on} | ${u.products_staged} | ${u.printings_promoted} | ${u.sealed_promoted} |`);
+  if (!externalUpcoming.length) md.push('| - | - | none | - | - | - | - | - |');
+  md.push('', 'Card printings of upcoming sets must stay at 0. Sealed pre-order products are catalogued for the market layer only; sealed release staging is not modelled yet (sealed scanning is out of scope).');
+  md.push('', '## Artwork-twin lock blocks', '', `${lockBlockedCount} pool printings share name + illustrator with a printing that has no usable reference image (e.g. 30th-c Classic Collection reprints). They stay in the pool but can never lock until the twin is indexed.`, '');
+  for (const lang of languages) {
+    const blocked = (poolByLang.get(lang) ?? []).filter(x => x.lockBlockedReason);
+    if (blocked.length) md.push(`- ${lang}: ${blocked.length} (e.g. ${blocked.slice(0, 6).map(x => `${x.setId} #${x.localId} ${x.name}`).join(', ')})`);
   }
   md.push('', '## Live-pool exclusions', '', ...[...exclusionCounts].sort((a, b) => b[1] - a[1]).map(([k, v]) => `- \`${k}\`: ${v}`));
   md.push('', 'Market coverage never affects pool membership or visual-only lock permission (identity/visual metrics only).');

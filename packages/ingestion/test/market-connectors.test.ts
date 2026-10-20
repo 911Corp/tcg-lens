@@ -133,3 +133,11 @@ test('collector-number match key is zero-padding insensitive across providers (v
   const decision = decideTcgcsvEnrichment(product, [{ entity_id: 'e', name: 'Chandelure', collector_number_normalized: '33', language_code: 'en', set_name: 'Rebel Clash', set_code: 'swsh2' }]);
   assert.equal(decision.status, 'AUTO_MATCH');
 });
+
+test('name + number without set/group agreement never auto-maps a marketplace product (v0.3.1)', () => {
+  const product = normalizeTcgcsvProduct({ groupId: 24831, name: 'ME06: Delta Reign', abbreviation: 'DLR', categoryId: 3 },
+    { productId: 77, name: 'Pikachu', cleanName: 'Pikachu', categoryId: 3, groupId: 24831, extendedData: [{ name: 'Number', value: '025/120' }] });
+  const decision = decideTcgcsvEnrichment(product, [{ entity_id: 'old', name: 'Pikachu', collector_number_normalized: '25', language_code: 'en', set_name: 'Some Older Set', set_code: 'old1' }]);
+  assert.equal(decision.status, 'CANDIDATE_MATCH');
+  assert.equal(decision.ruleId, 'TCGCSV_NUMBER_NAME_LANGUAGE_UNIQUE_NO_SET_AGREEMENT');
+});

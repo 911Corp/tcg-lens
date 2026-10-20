@@ -140,3 +140,43 @@ test('Cardmarket crosswalk verifies TCGdex-asserted product IDs against the real
   assert.equal(decideCardmarketCrosswalk({ entityId: 'f', languageCode: 'fr', name: 'Dracaufeu ex', englishSiblingName: 'Charizard ex', englishSiblingAssertsSameProduct: false }, product, ctx).status, 'CANDIDATE_MATCH');
   assert.equal(decideCardmarketCrosswalk({ entityId: 'f', languageCode: 'fr', name: 'Dracaufeu ex' }, product, ctx).ruleId, 'CM_XWALK_NO_ENGLISH_REFERENCE_NAME');
 });
+
+import { decideTcgplayerCrosswalk } from '../src/index.js';
+
+test('TCGplayer crosswalk never prices a printing from another language scope', () => {
+  const ctx = { setGroupMode: 3170, setGroupModeShare: 0.95, printingsAssertingSameProductInLanguage: 1 };
+  const enProduct = { productId: 1, languageCode: 'en', name: 'Chandelure', collectorNumber: '033', groupId: 3170 };
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'e', languageCode: 'en', name: 'Chandelure', collectorNumber: '33' }, enProduct, ctx).status, 'AUTO_MATCH');
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'f', languageCode: 'fr', name: 'Lugulabre', collectorNumber: '33' }, enProduct, ctx).ruleId, 'TP_XWALK_LANGUAGE_SCOPE_MISMATCH');
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'e', languageCode: 'en', name: 'Chandelure', collectorNumber: '34' }, enProduct, ctx).status, 'CONFLICT');
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'e', languageCode: 'en', name: 'Chandelure', collectorNumber: '33' }, { ...enProduct, groupId: 1 }, ctx).ruleId, 'TP_XWALK_GROUP_INCONSISTENT');
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'e', languageCode: 'en', name: 'Basculin', collectorNumber: '24' }, { ...enProduct, name: 'Basculin Master Ball Pattern', collectorNumber: '024' }, ctx).ruleId, 'TP_XWALK_NAME_DIFFERS');
+  const jaProduct = { productId: 2, languageCode: 'ja', name: 'Ninetales', collectorNumber: '013', groupId: 9 };
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'j', languageCode: 'ja', name: 'キュウコン', collectorNumber: '013' }, jaProduct, { ...ctx, setGroupMode: 9 }).ruleId, 'TP_XWALK_ID_NUMBER_GROUP_CONFIRMED');
+  assert.equal(decideTcgplayerCrosswalk({ entityId: 'j', languageCode: 'ja', name: 'キュウコン', collectorNumber: '013' }, jaProduct, { ...ctx, setGroupMode: 9, printingsAssertingSameProductInLanguage: 2 }).status, 'CANDIDATE_MATCH');
+});
+
+import { tcgplayerComparableName } from '../src/index.js';
+
+test('TCGplayer name comparison strips number suffixes and punctuation but keeps variant words', () => {
+  assert.equal(tcgplayerComparableName('Glimmet 125 193', '125'), tcgplayerComparableName('Glimmet', '125'));
+  assert.equal(tcgplayerComparableName('Pikachu SM162', 'SM162'), 'pikachu');
+  assert.equal(tcgplayerComparableName('Team Magmas Groudon', '9'), tcgplayerComparableName("Team Magma's Groudon", '9'));
+  assert.equal(tcgplayerComparableName('Team Rockets Nidoran F', '1'), tcgplayerComparableName("Team Rocket's Nidoran♀", '1'));
+  assert.notEqual(tcgplayerComparableName('Victini Master Ball Pattern', '7'), tcgplayerComparableName('Victini', '7'));
+  assert.notEqual(tcgplayerComparableName('Drifblim 135 Prerelease Staff', '135'), tcgplayerComparableName('Drifblim', '135'));
+  assert.equal(tcgplayerComparableName('Porygon2', '2'), 'porygon2', 'digits inside a name are kept');
+});
+
+import { applyArtworkTwinPolicy, artworkTwinKey } from '../src/index.js';
+
+test('artwork twins: an unindexed reprint blocks locking; any twin forbids visual-only (30th-c case)', () => {
+  assert.equal(artworkTwinKey({ languageCode: 'en', name: 'Charizard', illustrator: 'Mitsuhiro Arita' }), artworkTwinKey({ languageCode: 'en', name: 'charizard', illustrator: 'mitsuhiro arita' }));
+  assert.notEqual(artworkTwinKey({ languageCode: 'en', name: 'Charizard', illustrator: 'Mitsuhiro Arita' }), artworkTwinKey({ languageCode: 'fr', name: 'Charizard', illustrator: 'Mitsuhiro Arita' }));
+  assert.equal(artworkTwinKey({ languageCode: 'en', name: 'Charizard', illustrator: null }), null, 'no illustrator, no twin inference');
+  const eligible = decidePrintingEligibility({ productMedium: 'PHYSICAL', releaseStatus: 'RELEASED', entityActiveCanonical: true, hasOpenConflict: false, imageProbeOk: true, setIdentityVisualReadiness: 'VISUAL_COMPLETE' });
+  assert.equal(eligible.visualOnlyLockAllowed, true);
+  assert.deepEqual(applyArtworkTwinPolicy(eligible, { total: 0, unindexed: 0 }), { visualOnlyLockAllowed: true, lockBlockedReason: null });
+  assert.deepEqual(applyArtworkTwinPolicy(eligible, { total: 2, unindexed: 0 }), { visualOnlyLockAllowed: false, lockBlockedReason: null });
+  assert.deepEqual(applyArtworkTwinPolicy(eligible, { total: 6, unindexed: 1 }), { visualOnlyLockAllowed: false, lockBlockedReason: 'UNINDEXED_ARTWORK_TWIN' });
+});

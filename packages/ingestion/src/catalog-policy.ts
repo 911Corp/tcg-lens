@@ -316,3 +316,34 @@ export function decidePrintingEligibility(input: PrintingEligibilityInput): Prin
 
   return { indexable, inLivePool, visualOnlyLockAllowed, reason: reasons[0] ?? null };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Artwork twins (reprints / classic collections)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Printings in the same language with the same normalized name and the same illustrator are
+ * treated as probable artwork twins (reprints, classic collections). A twin that is absent from the
+ * visual index cannot be told apart visually, and reprints may carry the original printed number,
+ * so OCR cannot disambiguate either.
+ *
+ *   - any unindexed twin  -> the candidate may never lock (`lockBlockedReason`)
+ *   - any twin            -> no visual-only lock (printed-number corroboration required)
+ */
+export function artworkTwinKey(input: { languageCode: string; name: string; illustrator: string | null | undefined }): string | null {
+  const illustrator = input.illustrator ? normalizeTextV1(input.illustrator) : '';
+  if (!illustrator || illustrator === 'unknown') return null;
+  return `${input.languageCode}|${normalizeTextV1(input.name)}|${illustrator}`;
+}
+
+export interface ArtworkTwinPolicyResult {
+  visualOnlyLockAllowed: boolean;
+  lockBlockedReason: string | null;
+}
+
+export function applyArtworkTwinPolicy(eligibility: PrintingEligibility, twins: { total: number; unindexed: number }): ArtworkTwinPolicyResult {
+  if (!eligibility.inLivePool) return { visualOnlyLockAllowed: false, lockBlockedReason: null };
+  if (twins.unindexed > 0) return { visualOnlyLockAllowed: false, lockBlockedReason: 'UNINDEXED_ARTWORK_TWIN' };
+  if (twins.total > 0) return { visualOnlyLockAllowed: false, lockBlockedReason: null };
+  return { visualOnlyLockAllowed: eligibility.visualOnlyLockAllowed, lockBlockedReason: null };
+}
