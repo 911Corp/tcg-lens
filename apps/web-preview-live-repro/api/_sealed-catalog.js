@@ -24,6 +24,8 @@ export async function loadSealedCatalog() {
   const groups = new Map();
   for (const r of raw.items) {
     const it = Object.fromEntries(raw.columns.map(c => [c, r[col[c]]]));
+    // A zero or negative price is "no price" at the source, never a real 0.
+    for (const k of ['cmTrendEur', 'cmLowEur', 'tpMarketUsd', 'tpLowUsd']) if (!(it[k] > 0)) it[k] = null;
     const key = `${it.type}|${fold(it.name).replace(/[^a-z0-9]+/g, ' ').trim()}|${it.lang === 'ja' ? 'ja' : 'x'}`;
     const g = groups.get(key);
     if (!g) { groups.set(key, { ...it, entityIds: [it.entityId] }); continue; }

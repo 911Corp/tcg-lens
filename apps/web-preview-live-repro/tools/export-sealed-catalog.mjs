@@ -44,7 +44,7 @@ const { rows } = await client.query(`
   LEFT JOIN ids ON ids.entity_id = s.entity_id LEFT JOIN prices p ON p.entity_id = s.entity_id
   ORDER BY s.release_date DESC NULLS LAST, s.official_name`);
 
-const num = v => (v == null ? null : Math.round(Number(v) * 100) / 100);
+const num = v => (v == null || !(Number(v) > 0) ? null : Math.round(Number(v) * 100) / 100);
 const items = rows.map(r => [
   r.entity_id, r.official_name, r.product_type, r.language_code || null,
   r.release_date ? r.release_date.toISOString().slice(0, 10) : null,
