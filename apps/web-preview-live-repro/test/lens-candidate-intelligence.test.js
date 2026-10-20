@@ -203,3 +203,38 @@ test('targeted warming adds canonical refs with pool flags, bounded and language
   assert.equal(index.refs.get('en:old-2').visualOnlyLockAllowed, false);
   assert.deepEqual(await index.warmTargeted(items.slice(0, 3), 'en', embedding), [], 'idempotent');
 });
+
+test('a single noisy printed-number read does not poison the track; two identical reads do block', () => {
+  const ocr = new OCRConsensus();
+  const noisy = { available: true, candidateId: 'a', contradiction: true, contradictionKind: 'printed_metadata', contradictionSignature: 'EO1/38' };
+  assert.equal(ocr.observe(noisy, 'a').contradiction, false, 'one garbage read is not a contradiction');
+  assert.equal(ocr.observe({ ...noisy, contradictionSignature: 'E01/36' }, 'a').contradiction, false, 'different garbage does not accumulate');
+  assert.equal(ocr.observe(noisy, 'a').contradiction, true, 'the same mismatching read twice is a real contradiction');
+  const other = new OCRConsensus();
+  assert.equal(other.observe({ available: true, candidateId: 'b', collectorExact: true, contradiction: true, contradictionKind: 'exact_other_candidate' }, 'a').contradiction, true, 'exact other candidate still blocks immediately');
+});
+
+test('replay: one noisy printed read during A does not prevent the A locks', () => {
+  let reads = 0;
+  const { events } = runReplay({ visualOnlyLockAllowed: true, ocrRead: () => (reads++ === 0 ? { candidateId: null, contradiction: true, contradictionKind: 'printed_metadata', contradictionSignature: 'EO1/38' } : null) });
+  const locks = events.filter(e => e.type === 'LOCK').map(e => e.candidateId);
+  assert.deepEqual(locks, ['test-a', 'test-a']);
+});
+
+test('background warming indexes every pool item of a page (no silent skips)', async () => {
+  const index = new ANNIndex({ maxRefs: 100 });
+  const pool = Array.from({ length: 40 }, (_, i) => ({ id: `c-${i}`, lang: 'en', name: `C${i}`, localId: String(i), image: `https://x/${i}/low.webp` }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    const u = new URL(url, 'http://local');
+    const offset = Number(u.searchParams.get('cursor')), size = Number(u.searchParams.get('size'));
+    return { ok: true, json: async () => ({ total: pool.length, buildId: 'b', items: pool.slice(offset, offset + size), nextCursor: String(offset + size), exhausted: offset + size >= pool.length }) };
+  };
+  const embedding = { model: { ok: true }, imageCanvas: async () => ({}), fastDescriptor: () => [1, 0], embed: async () => { throw new Error('deep embedding must not run during background warm'); } };
+  try {
+    for (let i = 0; i < 3; i++) await index.warm('en', embedding, { batch: 18 });
+    assert.equal(index.count('en'), 40);
+    assert.equal(index.target('en'), 40);
+    assert.ok([...index.refs.values()].every(r => r.deep === null), 'deep computed lazily at query time');
+  } finally { globalThis.fetch = originalFetch; }
+});

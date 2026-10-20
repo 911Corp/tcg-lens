@@ -42,6 +42,9 @@ export class OCRAdapter {
       printingSupport: Boolean(best?.collectorExact),
       conceptSupport: Boolean(best?.nameScore >= 0.72),
       contradiction: Boolean(best?.contradiction),
+      // Printed-metadata contradictions are only made hard by OCRConsensus after repeated identical reads.
+      contradictionKind: best?.contradiction ? (best.contradictionReasons ? 'printed_metadata' : 'exact_other_candidate') : null,
+      contradictionSignature: best?.contradictionReasons ? `${parsed.collector}/${parsed.printedTotal ?? ''}` : null,
       // Canonical printings matching number + printed total; used for targeted index warming only.
       lookupItems: parsed.printedTotal ? lookupItems : [],
     };

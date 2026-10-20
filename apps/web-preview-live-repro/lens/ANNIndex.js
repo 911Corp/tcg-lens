@@ -8,7 +8,11 @@ export class ANNIndex {
     this.loading = null;
     this.warming = false;
     this.cursor = new Map();
+    this.poolTotal = new Map();
   }
+
+  /** Number of refs the bounded on-device index aims to hold for a language. */
+  target(lang) { const total = this.poolTotal.get(lang); return total == null ? this.maxRefs : Math.min(this.maxRefs, total); }
 
   async open() {
     if (this.db || typeof window === 'undefined' || !('indexedDB' in window)) return this.db;
@@ -72,20 +76,26 @@ export class ANNIndex {
     return pre.slice(0, k).map(x => ({ ...x.ref, score: x.score ?? x.fastScore, fastScore: x.fastScore, deepScore: x.deepScore, embeddingVerified: x.deepScore != null }));
   }
 
-  async warm(lang, embedding, { batch = 18, signal = null } = {}) {
+  async warm(lang, embedding, { batch = 18, signal = null, concurrency = 6 } = {}) {
     if (this.warming || this.count(lang) >= this.maxRefs) return;
     this.warming = true;
     try {
       await this.load(lang);
       let cursor = this.cursor.get(lang) || '0';
-      const params = new URLSearchParams({ lang, cursor, size: String(Math.max(batch, 24)) });
+      // v0.3.1 fix: request exactly the page we process. Previously 24 items were requested, 18 processed
+      // and the cursor advanced by 24, so one reference in four was silently never indexed.
+      const size = Math.max(8, batch);
+      const params = new URLSearchParams({ lang, cursor, size: String(size) });
       const response = await fetch(`/api/visual-cards?${params}`); if (!response.ok) return;
       const payload = await response.json();
-      const items = (payload.items || []).filter(x => x.image).slice(0, batch);
-      for (const card of items) {
-        if (signal?.aborted) break;
-        const key = `${lang}:${card.id}`; if (this.refs.has(key)) continue;
-        try { await this.put(await this._refFromCard(card, lang, embedding, payload.buildId)); } catch {}
+      if (Number.isFinite(payload.total)) this.poolTotal.set(lang, payload.total);
+      const items = (payload.items || []).filter(x => x.image && !this.refs.has(`${lang}:${x.id}`));
+      // Background warming stores the cheap prefilter descriptor only; the deep embedding is computed
+      // lazily in query() for the few refs that reach final scoring (same scores, far faster warm-up).
+      for (let i = 0; i < items.length && !signal?.aborted; i += concurrency) {
+        const refs = await Promise.all(items.slice(i, i + concurrency).map(card =>
+          this._refFromCard(card, lang, embedding, payload.buildId, { deep: false }).catch(() => null)));
+        for (const ref of refs) if (ref) await this.put(ref);
       }
       if (payload.exhausted) cursor = '0'; else cursor = payload.nextCursor || cursor;
       this.cursor.set(lang, cursor); await this._metaSet(`cursor:${lang}`, cursor);
@@ -107,11 +117,11 @@ export class ANNIndex {
     return added;
   }
 
-  async _refFromCard(card, lang, embedding, buildId) {
+  async _refFromCard(card, lang, embedding, buildId, { deep: withDeep = true } = {}) {
     const image = await embedding.imageCanvas(card.image);
     const fast = Array.from(embedding.fastDescriptor(image));
     let deep = null;
-    if (embedding.model) deep = Array.from(await embedding.embed(image));
+    if (withDeep && embedding.model) deep = Array.from(await embedding.embed(image));
     return {
       key: `${lang}:${card.id}`, id: card.id, entityId: card.entityId || null, name: card.name, localId: String(card.localId || ''), lang,
       setId: card.setId || null, setName: card.setName || null, setAbbreviation: card.setAbbreviation || null,

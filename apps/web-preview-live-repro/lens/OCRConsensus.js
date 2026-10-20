@@ -10,6 +10,7 @@ export class OCRConsensus {
     this.observations = [];
     this.hardContradiction = null;
     this.latest = null;
+    this.metadataContradictions = new Map();
   }
 
   observe(evidence, expectedCandidateId = null) {
@@ -26,6 +27,20 @@ export class OCRConsensus {
     const exactOtherCandidate = Boolean(
       expectedCandidateId && obs.candidateId && obs.candidateId !== expectedCandidateId && obs.collectorExact
     );
+    // v0.3.1: a printed number/total that disagrees with the candidate is only a hard contradiction
+    // once the SAME mismatching read repeats (2-read consensus). A single noisy OCR read must not
+    // poison the whole track. Exact-other-candidate contradictions still block immediately.
+    if (obs.contradiction && evidence.contradictionKind === 'printed_metadata') {
+      const sig = String(evidence.contradictionSignature || '');
+      const n = (this.metadataContradictions.get(sig) || 0) + 1;
+      this.metadataContradictions.set(sig, n);
+      if (n < this.requiredExactVotes) {
+        obs.contradiction = false;
+        obs.collectorExact = false;
+        this.pendingMetadataContradiction = { signature: sig, reads: n };
+        return this.summary(expectedCandidateId);
+      }
+    }
     if (obs.contradiction || exactOtherCandidate) {
       this.hardContradiction = {
         candidateId: obs.candidateId,

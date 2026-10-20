@@ -32,6 +32,12 @@ const scenarios = [
     requirements: { minSegmentCoverage: 0, lockSequence: [] },
   },
   {
+    // Recall gate: one garbage OCR read (e.g. "EO1/38") must not poison the track.
+    id: 'single-noisy-printed-read-does-not-block',
+    run: () => { let reads = 0; return runReplay({ visualOnlyLockAllowed: true, ocrRead: () => (reads++ === 0 ? { candidateId: null, contradiction: true, contradictionKind: 'printed_metadata', contradictionSignature: 'EO1/38' } : null) }); },
+    requirements: { minSegmentCoverage: 2 / 3, lockSequence: ['test-a', 'test-a'] },
+  },
+  {
     id: 'printed-metadata-contradiction-blocks-extreme-visual',
     run: () => runReplay({ visualOnlyLockAllowed: true, ocrRead: () => ({ candidateId: null, contradiction: true }) }),
     requirements: { minSegmentCoverage: 0, lockSequence: [] },
