@@ -1,1 +1,13 @@
-{"functions":{"api/*.js":{"includeFiles":"data/**"}},"headers":[{"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"},{"key":"Permissions-Policy","value":"camera=(self)"}]}]}
+{
+  "functions": { "api/*.js": { "includeFiles": "data/**", "memory": 1024, "maxDuration": 15 } },
+  "headers": [
+    { "source": "/(.*)", "headers": [
+      { "key": "X-Content-Type-Options", "value": "nosniff" },
+      { "key": "Permissions-Policy", "value": "camera=(self)" },
+      { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+      { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+    ] },
+    { "source": "/fonts/(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ] },
+    { "source": "/sw.js", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
+  ]
+}

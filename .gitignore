@@ -17,3 +17,4 @@ data/reports/*.tmp
 apps/web-preview-live-repro/data/candidate-pool-*.json
 .tmp-v031-it/
 data/reports/
+.vercel

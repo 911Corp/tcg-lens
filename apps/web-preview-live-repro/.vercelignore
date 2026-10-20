@@ -1,0 +1,4 @@
+# Deploy only what the browser app and its API need. data/ (canonical candidate pool) MUST be uploaded.
+test/
+benchmark/
+dev-server.mjs
