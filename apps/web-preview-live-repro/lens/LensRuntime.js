@@ -91,7 +91,12 @@ export class LensRuntime {
       const dimensions = await this.camera.attach(stream, () => { this.cameraNeedsTap = true; this._hud(true); });
       this.cameraNeedsTap = false;
       this.telemetry.emit('CAMERA_READY', dimensions);
-      this.embedding.ensureModel().then(ready => this.telemetry.emit('EMBEDDING_MODEL', { ready }));
+      this.embedding.ensureModel().then(ready => {
+        this.telemetry.emit('EMBEDDING_MODEL', { ready });
+        // v0.4.4: the text readers start once the vision model is ready, so the first printed-text proof
+        // (language, script, number) arrives ~2 s sooner instead of paying the readers' start-up mid-scan.
+        if (!this.ocrWarm) { this.ocrWarm = true; setTimeout(() => this.ocr.warm?.(this.lang).catch?.(() => {}), 800); }
+      });
       this._loadIndex();
       this._schedule();
       return true;
@@ -782,9 +787,21 @@ export class LensRuntime {
     if (!c || c.locked || c.proposalsRejected || this.multiMode) return;
     const st = this.stateMachine.state;
     if (st === LENS_STATES.LOCKED || st === LENS_STATES.CHANGE_PENDING) return;
-    if (st !== LENS_STATES.AMBIGUOUS && performance.now() - c.startedAt < 1200) return;
+    // v0.4.4: artwork twins are usually settled by the zone model or the printed number within ~4 s: no
+    // multiple-choice flash before that.
+    const twinsPending = c.lastDecision?.reason === 'artwork_twins';
+    const age = performance.now() - c.startedAt;
+    if (age < (twinsPending ? 4000 : st === LENS_STATES.AMBIGUOUS ? 0 : 1200)) return;
+    // A text read in progress on twins will most often settle them: wait for it (at most 8 s in all).
+    if (twinsPending && c.ocrInFlight && age < 8000) return;
     const evidence = { printed: stablePrintedRead(c.ocrTexts), language: c.langConsensus.resolved(CARD), script: c.langConsensus.scriptResolved(CARD) };
     const list = c.proposals.stable(c.visualCandidates, evidence);
+    // v0.4.4: a single proposal matching the printed number AND total read twice identically, with every other
+    // shortlisted printing contradicted by that read, is an identification, not a choice.
+    const matches = list.filter(x => x.numberMatch);
+    if (evidence.printed && matches.length === 1 && list.length >= 1 && !c.blockedId) {
+      if (this.confirmProposal(matches[0].id, { auto: true })) return;
+    }
     const sig = `${evidence.language || ''}|` + list.map(x => `${x.id}:${x.numberMatch ? 1 : 0}`).join(',');
     if (sig === c.proposalsShown) return;
     c.proposalsShown = sig;
@@ -814,28 +831,29 @@ export class LensRuntime {
   }
 
   /** The user confirmed a proposal: it becomes the result, marked as confirmed by the user. */
-  confirmProposal(id) {
+  confirmProposal(id, { auto = false } = {}) {
     const c = this.context; if (!c || c.locked) return false;
+    const reason = auto ? 'printed_number_match' : 'user_confirmed_proposal';
     const cand = c.visualCandidates.find(k => k.id === id); if (!cand) return false;
     const lang = c.langConsensus.resolved(CARD);
     const row = (lang && cand.byLang?.[lang]) || (cand.languages?.length === 1 && cand.byLang?.[cand.languages[0]])
       || cand.byLang?.[(document.documentElement.lang || 'fr').slice(0, 2)] || cand;
     const { byLang, languages, ...printing } = row;
     const identity = lang
-      ? { ...printing, lang, userConfirmed: true }
-      : { ...printing, lang: null, languageUnverified: true, languageCandidates: cand.languages || [printing.lang].filter(Boolean), userConfirmed: true };
+      ? { ...printing, lang, userConfirmed: !auto, ...(auto ? { printedNumberMatch: true } : {}) }
+      : { ...printing, lang: null, languageUnverified: true, languageCandidates: cand.languages || [printing.lang].filter(Boolean), userConfirmed: !auto, ...(auto ? { printedNumberMatch: true } : {}) };
     // Legal path to LOCKED: (UNKNOWN →) ANALYZING → VERIFYING → LOCKED, or AMBIGUOUS → VERIFYING → LOCKED.
-    if (this.stateMachine.state === LENS_STATES.UNKNOWN) this._safeTransition(LENS_STATES.ANALYZING, { id, reason: 'user_confirmed_proposal' });
-    if (this.stateMachine.state !== LENS_STATES.VERIFYING) this._safeTransition(LENS_STATES.VERIFYING, { candidateId: id, reason: 'user_confirmed_proposal' });
-    if (!this._safeTransition(LENS_STATES.LOCKED, { id, reason: 'user_confirmed_proposal' })) {
+    if (this.stateMachine.state === LENS_STATES.UNKNOWN) this._safeTransition(LENS_STATES.ANALYZING, { id, reason });
+    if (this.stateMachine.state !== LENS_STATES.VERIFYING) this._safeTransition(LENS_STATES.VERIFYING, { candidateId: id, reason });
+    if (!this._safeTransition(LENS_STATES.LOCKED, { id, reason })) {
       this.telemetry.emit('PROPOSAL_CONFIRM_REJECTED_STATE', { id, state: this.stateMachine.state });
       return false;
     }
-    c.locked = { id, confidence: 0, identity, group: [id], userConfirmed: true };
-    if (c.lastQuery) this.memory.add(id, c.lastQuery, { languages: cand.languages || [] });
-    this.telemetry.emit('PROPOSAL_CONFIRMED', { id, memory: this.memory.size });
+    c.locked = { id, confidence: auto ? 0.9 : 0, identity, group: [id], userConfirmed: !auto, ...(auto ? { printedNumberMatch: true } : {}) };
+    if (c.lastQuery && !auto) this.memory.add(id, c.lastQuery, { languages: cand.languages || [] });
+    this.telemetry.emit(auto ? 'PRINTED_NUMBER_LOCK' : 'PROPOSAL_CONFIRMED', { id, memory: this.memory.size });
     document.dispatchEvent(new CustomEvent('tcglens:card-locked', { detail: identity }));
-    this.marketOverlay.showLocked(identity, 0);
+    this.marketOverlay.showLocked(identity, c.locked.confidence);
     this._renderTrack(this.tracker.track); this._hud(true);
     return true;
   }

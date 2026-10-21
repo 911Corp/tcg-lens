@@ -19,6 +19,15 @@ export class OCRAdapter {
     return this.workers.get(tessLang);
   }
 
+  /** v0.4.4: start the readers ahead of the first card (each runs one tiny recognition to finish loading). */
+  async warm(lang = 'auto') {
+    const auto = lang === 'auto';
+    const blank = document.createElement('canvas'); blank.width = 64; blank.height = 24;
+    const g = blank.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 64, 24);
+    const ws = await Promise.all([this.ensureWorker(auto ? 'en' : lang), this._digitsWorker(), auto ? this.ensureWorker('ja') : null]);
+    for (const w of ws) if (w) { try { await w.recognize(blank); } catch {} }
+  }
+
   /** Separate reader restricted to digits and "/" (sparse text: the zone also holds the illustrator line): the printed collector number. */
   _digitsWorker() {
     if (!this.workers.has('digits')) {
@@ -48,7 +57,7 @@ export class OCRAdapter {
       }
       // Near-identical frames repeat the same misreading, so implausible numbers are dropped here
       // rather than left to the 2-identical-reads contradiction rule.
-      return out.filter(plausibleCollector).join(' ');
+      return [...new Set(out.flatMap(collectorCandidates))].join(' ');
     } catch { return ''; }
   }
 
@@ -166,6 +175,27 @@ export class OCRAdapter {
     if (window.Tesseract) return;
     await new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; s.async = true; s.onload = resolve; s.onerror = reject; document.head.appendChild(s); });
   }
+}
+
+/**
+ * v0.4.4: printed "number/total" candidates in a digits-only read. Tesseract glues neighbouring marks to the
+ * number ("35036/12814730" for 036/128, "083/2172026/" with the regulation year): around every "/", the
+ * numerator is the last 3 digits of the run before it (or the whole run when shorter: "4/102"), the total the
+ * first 3 digits after it (2 when 3 is implausible). Only plausible pairs are kept.
+ */
+export function collectorCandidates(text) {
+  const s = String(text || '').replace(/\s+/g, ''), out = [];
+  const re = /(\d+)\/(\d+)/g; let m;
+  while ((m = re.exec(s))) {
+    const left = m[1], right = m[2];
+    const num = left.length > 3 ? left.slice(-3) : left;
+    for (const total of [right.slice(0, 3), right.slice(0, 2)]) {
+      const cand = `${num}/${total}`;
+      if (total.length >= 2 && plausibleCollector(cand)) { out.push(cand); break; }
+    }
+    re.lastIndex = m.index + m[1].length + 1; // overlapping: "071/21762026/" then the next "/"
+  }
+  return [...new Set(out)];
 }
 
 /** A digits-only read that looks like a real printed "number/total". */

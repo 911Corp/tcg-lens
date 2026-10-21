@@ -32,3 +32,9 @@ test('preferred market follows the app language', () => {
   assert.equal(us.pricing.cardmarket.trend, 12.5, 'Cardmarket momentum still feeds Heat');
   assert.equal(marketFromCanonical({ cm: [12.5] }, null, 'us').market.source, 'Cardmarket', 'falls back when TCGplayer has no price');
 });
+
+test('v0.4.4: a price taken from another language is shown as an estimate', () => {
+  const card = { market: { center: 0.71, currency: 'USD', source: 'TCGplayer', estimated: true, estimatedFrom: 'en' }, priceLang: 'en', priceEstimated: true };
+  const m = lockedSheetModel({ id: '30th-038', name: 'Pikachu', lang: 'fr' }, card);
+  assert.equal(m.estimated, true); assert.match(m.price, /^≈ /); assert.match(m.priceSource, /^Estimation · TCGplayer \(EN\)$/);
+});

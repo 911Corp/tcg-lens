@@ -83,15 +83,18 @@ export class ProposalTracker {
       // v0.4.3: a card proven to be printed in Latin script is never proposed as its Japanese printing (and vice versa).
       if (evidence.script === 'latin' && langs.every(l => l === 'ja')) continue;
       if (evidence.script === 'ja' && !langs.includes('ja')) continue;
-      let numberMatch = false;
+      let numberMatch = false, contradicted = false;
       if (evidence.printed) {
         const row = (evidence.language && c.byLang?.[evidence.language]) || c;
         const v = corroborateCandidate(row, evidence.printed, {});
-        if (v.contradicts) continue;
         numberMatch = v.printingSupport;
+        contradicted = v.contradicts;
       }
-      out.push({ id: a.id, p: a.sum / a.frames, frames: a.frames, numberMatch, remembered: a.remembered });
+      out.push({ id: a.id, p: a.sum / a.frames, frames: a.frames, numberMatch, remembered: a.remembered, contradicted });
     }
+    // v0.4.4: the printed read removes the other printings only once it is confirmed by a matching one (a
+    // repeated OCR misread must never remove the right card).
+    if (out.some(x => x.numberMatch)) for (let i = out.length - 1; i >= 0; i--) if (out[i].contradicted) out.splice(i, 1);
     // The strongest proposal must itself have passed the display bar on average.
     out.sort((x, y) => (y.numberMatch - x.numberMatch) || (y.remembered - x.remembered) || (y.p - x.p));
     return out.length && (out[0].numberMatch || out[0].p >= 0.6) ? out.slice(0, 3) : [];

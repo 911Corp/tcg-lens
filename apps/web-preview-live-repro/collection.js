@@ -79,7 +79,7 @@ function render() {
         <div class="coll-info">
           <b>${esc(x.name)}</b>
           <small>${esc([x.setName, x.number, langLabel(x)].filter(Boolean).join(' · '))}</small>
-          <span class="coll-price">${x.market?.center != null ? `${esc(x.market.from ? t('dès {price}', { price: money(x.market.center, x.market.currency) }) : money(x.market.center, x.market.currency))}${x.qty > 1 ? ` <small>× ${x.qty} = ${esc(money(Math.round(x.market.center * x.qty * 100) / 100, x.market.currency))}</small>` : ''}` : `<small>${esc(t('Prix n.d.'))}</small>`}</span>
+          <span class="coll-price">${x.market?.center != null ? `${x.market.estimated ? `<small>${esc(t('Estimation'))}</small> ≈ ` : ''}${esc(x.market.from ? t('dès {price}', { price: money(x.market.center, x.market.currency) }) : money(x.market.center, x.market.currency))}${x.qty > 1 ? ` <small>× ${x.qty} = ${esc(money(Math.round(x.market.center * x.qty * 100) / 100, x.market.currency))}</small>` : ''}` : `<small>${esc(t('Prix n.d.'))}</small>`}</span>
         </div>
         <div class="coll-qty" role="group" aria-label="${esc(t('Quantité'))}">
           <button type="button" data-q="-1" aria-label="${esc(t('Retirer un exemplaire'))}">−</button><span>${x.qty}</span><button type="button" data-q="1" aria-label="${esc(t('Ajouter un exemplaire'))}">+</button>
@@ -124,7 +124,7 @@ async function refreshPrices() {
         if (c.market?.center == null) return;
         const list = read(), k = list.findIndex(y => y.key === x.key);
         if (k < 0) return;
-        list[k] = { ...list[k], market: { center: c.market.center, currency: c.market.currency || 'EUR', source: c.market.source || null, from: Boolean(c.market.from) }, priceAt: Date.now() };
+        list[k] = { ...list[k], market: { center: c.market.center, currency: c.market.currency || 'EUR', source: c.market.source || null, from: Boolean(c.market.from), estimated: Boolean(c.market.estimated), estimatedFrom: c.market.estimatedFrom || null }, priceAt: Date.now() };
         write(list); updated++;
       } catch {}
     }));

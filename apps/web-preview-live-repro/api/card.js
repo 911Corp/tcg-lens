@@ -81,7 +81,16 @@ export default async function handler(req,res){
     const pricing=canon?canon.pricing:(c.pricing||{});
     const fromTd=canon?null:marketFromPricing(pricing,prefer);
     const market=canon?canon.market:{...fromTd,source:fromTd.currency==='USD'?'TCGplayer':pricing.cardmarket?'Cardmarket':null};
-    const body={id:c.id,name:c.name||null,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?(/\.(jpe?g|png|webp)$/i.test(c.image)?c.image:`${c.image}/high.webp`):null,market,priceLang:canon?priceLang:lang,heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
+    // v0.4.4: no price for this printing's language → estimate from the same printing in another language
+    // (FR ↔ EN first, then JA), always flagged as an estimate with the language it comes from.
+    let estimated=null;
+    if(!(Number(market?.center)>0)){
+      const order={fr:['en','ja'],en:['fr','ja'],ja:['en','fr']}[lang]||[];
+      const estLang=order.find(l=>store.prices?.[`${l}:${id}`]);
+      const est=estLang?marketFromCanonical(store.prices[`${estLang}:${id}`],store.asOf,prefer):null;
+      if(est?.market?.center>0)estimated={lang:estLang,market:{...est.market,estimated:true,estimatedFrom:estLang}};
+    }
+    const body={id:c.id,name:c.name||null,localId:String(c.localId??''),category:c.category||null,hp:c.hp||null,types:c.types||[],rarity:c.rarity||null,illustrator:c.illustrator||null,description:c.description||null,set:c.set||null,variants:c.variants||null,pricing,image:c.image?(/\.(jpe?g|png|webp)$/i.test(c.image)?c.image:`${c.image}/high.webp`):null,market:estimated?estimated.market:market,priceLang:estimated?estimated.lang:canon?priceLang:lang,priceEstimated:Boolean(estimated),heat:heatFromPricing(pricing),supplyDemand:{score:null,label:'Beta N/A',estimated:true,confidence:'LOW',reason:'Real offer/demand inventory and sold-volume inputs are unavailable in this preview.'},lang};
     res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=3600'); res.setHeader('Vary','Accept-Encoding'); return res.status(200).json(body);
   }catch(e){return res.status(500).json({error:String(e?.message||e)});}
 }

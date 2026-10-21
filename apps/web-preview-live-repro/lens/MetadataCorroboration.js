@@ -41,6 +41,15 @@ export function parseCollectorText(text) {
   return { number, printedTotal, setCode: setCode ? setCode.toUpperCase() : null };
 }
 
+/** Edit distance exactly 1 between two short digit strings. */
+export function digitSlip(a, b) {
+  a = String(a); b = String(b); if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) { let d = 0; for (let i = 0; i < a.length; i++) d += a[i] !== b[i]; return d === 1; }
+  const [s, l] = a.length < b.length ? [a, b] : [b, a];
+  for (let i = 0; i < l.length; i++) if (l.slice(0, i) + l.slice(i + 1) === s) return true;
+  return false;
+}
+
 function compare(observed, expected, equals = (a, b) => a === b) {
   if (observed == null || observed === '' || expected == null || expected === '') return 'UNKNOWN';
   return equals(observed, expected) ? 'MATCH' : 'MISMATCH';
@@ -58,8 +67,12 @@ export function corroborateCandidate(candidate, parsed, { observedLanguage = nul
     const [n, t] = String(candidate.printedNumber).split('/');
     candidate = { ...candidate, localId: n, printedTotal: t != null && t !== '' ? Number(t) : candidate.printedTotal };
   }
-  const number = compare(parsed?.number, candidate?.localId != null ? normalizeNumberToken(candidate.localId) : null, (a, b) => normalizeNumberToken(a) === b);
-  const printedTotal = compare(parsed?.printedTotal, candidate?.printedTotal ?? null, (a, b) => Number(a) === Number(b));
+  let number = compare(parsed?.number, candidate?.localId != null ? normalizeNumberToken(candidate.localId) : null, (a, b) => normalizeNumberToken(a) === b);
+  let printedTotal = compare(parsed?.printedTotal, candidate?.printedTotal ?? null, (a, b) => Number(a) === Number(b));
+  // v0.4.4: one digit off while the other half matches ("77/165" for 17/165: 1↔7, 0↔6 are the usual OCR slips)
+  // is an unreadable digit, not a different printing: neither support nor contradiction.
+  if (number === 'MISMATCH' && printedTotal === 'MATCH' && digitSlip(normalizeNumberToken(parsed.number), normalizeNumberToken(candidate.localId))) number = 'UNKNOWN';
+  if (printedTotal === 'MISMATCH' && number === 'MATCH' && digitSlip(String(Number(parsed.printedTotal)), String(Number(candidate.printedTotal)))) printedTotal = 'UNKNOWN';
   const setCode = compare(parsed?.setCode, candidate?.setAbbreviation ? String(candidate.setAbbreviation).toUpperCase() : null);
   const language = compare(observedLanguage, candidate?.lang ?? null);
 

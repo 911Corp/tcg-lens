@@ -192,3 +192,12 @@ test('v0.4.3: the Latin name read twice proves a Latin-script card even when FR 
   assert.equal(lc.scriptResolved('card'), 'latin');
   assert.equal(detectCardLanguage('~ ES TR 60 ~', pika, { latinStrong: 0, jaStrong: 0, jaText: '' }).script, null);
 });
+
+import { collectorCandidates } from '../lens/OCRAdapter.js';
+test('v0.4.4: printed numbers are recovered from glued digits-only reads', () => {
+  assert.deepEqual(collectorCandidates('35036/12814730'), ['036/128']);
+  assert.deepEqual(collectorCandidates('083/2172026/'), ['083/217']);
+  assert.deepEqual(collectorCandidates('585071/21762026/'), ['071/217']);
+  assert.deepEqual(collectorCandidates('4/102'), ['4/102']);
+  assert.deepEqual(collectorCandidates('91403'), []);
+});

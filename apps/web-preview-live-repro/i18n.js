@@ -114,7 +114,7 @@
     // ---------------------------------------------------------------- result sheet, card details, market
     'Est-ce cette carte ?': 'Is this your card?', 'Aucune de ces cartes': 'None of these', 'Numéro concordant': 'Number matches', 'Très probable': 'Very likely', 'Probable': 'Likely',
     'Déjà confirmée par vous': 'You confirmed it before', 'Même illustration': 'Same artwork', 'Édition reconnue': 'Printing recognized', 'Confirmée par vous': 'Confirmed by you',
-    'Masquer le résultat': 'Hide result', 'Prix n.d.': 'No price', 'Extension inconnue': 'Unknown set', 'Langue ?': 'Language?', 'Carte': 'Card',
+    'Masquer le résultat': 'Hide result', 'Prix n.d.': 'No price', 'Estimation': 'Estimate', 'Numéro vérifié': 'Number verified', 'Prix estimé depuis la version {lang} (même carte, autre langue).': 'Estimated from the {lang} printing (same card, other language).', 'Extension inconnue': 'Unknown set', 'Langue ?': 'Language?', 'Carte': 'Card',
     'dès {price}': 'from {price}', 'Ajouter {name} à la collection': 'Add {name} to collection', 'Ouvrir la fiche de {name}': 'Open {name}',
     'En hausse': 'Rising', 'En baisse': 'Falling', 'Stable': 'Stable', 'Tendance inconnue': 'Trend unknown',
     'Froid': 'Cold', 'Frais': 'Cool', 'Tiède': 'Warm', 'Chaud': 'Hot', 'En flambée': 'Surging',

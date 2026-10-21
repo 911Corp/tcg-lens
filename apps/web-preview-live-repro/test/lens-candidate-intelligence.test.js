@@ -43,9 +43,12 @@ test('printed metadata that disagrees with the visual top is a physical contradi
   const wrongTotal = corroborateCandidate(charizard, { number: '199', printedTotal: 198, setCode: null });
   assert.equal(wrongTotal.contradicts, true);
   assert.deepEqual(wrongTotal.reasons, ['printed_total_mismatch']);
-  const wrongNumber = corroborateCandidate(charizard, { number: '198', printedTotal: 165, setCode: null });
+  const wrongNumber = corroborateCandidate(charizard, { number: '187', printedTotal: 165, setCode: null });
   assert.equal(wrongNumber.contradicts, true);
   assert.equal(wrongNumber.printingSupport, false);
+  // v0.4.4: one digit off with the total matching is an OCR slip (unreadable), neither support nor contradiction.
+  const slip = corroborateCandidate(charizard, { number: '198', printedTotal: 165, setCode: null });
+  assert.equal(slip.contradicts, false); assert.equal(slip.printingSupport, false);
   // A lone number read without a total is too weak to contradict (likely OCR noise) and never supports.
   const noisy = corroborateCandidate(charizard, { number: '189', printedTotal: null, setCode: null });
   assert.equal(noisy.contradicts, false);

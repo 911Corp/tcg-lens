@@ -21,7 +21,10 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
   const total = identity.printedTotal ?? c.set?.cardCount?.official ?? null;
   const amount = money(market.center, market.currency || 'EUR');
   // Several TCGplayer finishes priced and the finish not proven: lowest price, shown as "dès …".
-  const price = amount && market.from && !identity.variantProven ? t('dès {price}', { price: amount }) : amount;
+  const base = amount && market.from && !identity.variantProven ? t('dès {price}', { price: amount }) : amount;
+  // v0.4.4: no price for this language → the same printing's price in another language, always labelled.
+  const estimated = Boolean(amount && (market.estimated || c.priceEstimated));
+  const price = estimated ? `≈ ${base}` : base;
   const source = market.source || (market.currency === 'USD' ? 'TCGplayer' : amount ? 'Cardmarket' : null);
   // Price of another language's printing (language not proven yet): say which one.
   const priceLangNote = c.priceLang && (identity.languageUnverified || (identity.lang && c.priceLang !== identity.lang)) ? ` (${String(c.priceLang).toUpperCase()})` : '';
@@ -40,7 +43,8 @@ export function lockedSheetModel(identity = {}, card = null, confidence = 0) {
     confidence: Math.round((confidence || 0) * 100),
     loadingMarket: card == null,
     price,
-    priceSource: amount && source ? `${source}${priceLangNote}` : null,
+    priceSource: amount && source ? (estimated ? `${t('Estimation')} · ${source} (${String(market.estimatedFrom || c.priceLang || '').toUpperCase()})` : `${source}${priceLangNote}`) : null,
+    estimated,
     trend,
     heat: heat.score == null ? null : { label: HEAT_LABELS[heat.label] || heat.label, score: heat.score, beta: heat.beta !== false },
     supplyDemand: c.supplyDemand?.score == null ? null : c.supplyDemand.label,
@@ -80,7 +84,7 @@ export class MarketOverlay {
     this.root.classList.remove('is-dim');
     // v0.3.7: three short lines over the live camera — name + price, set · number · language, trend.
     const meta = [m.setName, m.number, m.language, m.variant].filter(Boolean).map(esc).join(' · ');
-    const confirmedNote = identity?.userConfirmed ? `<span class="sheet-confirmed">${esc(t('Confirmée par vous'))}</span>` : '';
+    const confirmedNote = identity?.userConfirmed ? `<span class="sheet-confirmed">${esc(t('Confirmée par vous'))}</span>` : identity?.printedNumberMatch ? `<span class="sheet-confirmed">${esc(t('Numéro vérifié'))}</span>` : '';
     const signals = [
       m.trend ? `${m.trend.arrow} ${esc(m.trend.text)}` : null,
       m.heat ? `Heat ${m.heat.score}${m.heat.beta ? ' β' : ''}` : null,

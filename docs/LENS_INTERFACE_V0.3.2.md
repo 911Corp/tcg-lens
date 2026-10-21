@@ -349,3 +349,21 @@ Signalement : Pikachu 30 ans FR (038/128, holo, sous pochette) jamais identifié
 - **Écriture latine prouvée** (langue latine lue, ou nom FR/EN lu deux fois) : la jumelle japonaise est retirée des
   jumelles et des propositions.
 - **Consensus** : 2 lectures et ≥ 3× les autres langues (une lecture parasite ne bloque plus).
+
+## v0.4.4 — prix estimé, mode plusieurs cartes retiré, moins de choix multiples
+
+- **Prix estimé** : sans prix pour la langue de la carte, l'API renvoie le prix de la même impression dans une autre
+  langue (FR ↔ EN, puis JA), marqué `estimated` ; affiché « ≈ … » avec « Estimation · source (langue) » (fiche,
+  détail, collection).
+- **Mode plusieurs cartes** retiré pour le moment (bouton masqué, `MULTI_ENABLED = false` dans `lens/index.js`).
+- **Numéro imprimé** : Tesseract colle des chiffres voisins au numéro (« 35036/12814730 » pour 036/128).
+  Nouveau `collectorCandidates` : lectures exactes 4 → 94 sur 283 cartes (tools/deep/lang/numtest.py).
+  Un chiffre d'écart avec l'autre moitié exacte = chiffre illisible, ni preuve ni contradiction.
+- **Propositions** : une seule impression dont le numéro et le total correspondent à la lecture (deux lectures
+  identiques) → identification directe (« Numéro vérifié ») ; une lecture ne retire les autres impressions que si
+  elle est confirmée par une impression correspondante.
+- **Jumelles** : pas de propositions avant 4 s, ni pendant une lecture du texte en cours (8 s au plus) — elles sont
+  le plus souvent tranchées par le modèle de zones ou le texte. Lecteurs de texte démarrés dès que le modèle visuel
+  est prêt.
+- Modèle de zones : 22 000 recadrages d'entraînement en plus et projection discriminante testés — pas de gain
+  (91,5 % / 91,0 % contre 91,4 %), modèle inchangé : la limite est la résolution des zones, le numéro imprimé tranche.

@@ -23,7 +23,7 @@ APP = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 W = os.environ.get('REGION_WORK', '/tmp/tcg-lens-deep/region')
 TWINS = os.environ.get('TWIN_GROUPS', os.path.join(os.environ.get('REGION_JOBS_DIR', '/tmp/claude-0/cal'), 'twin-groups.json'))
 REG = ['text', 'bottom', 'top']; BOXES = {'text': [0.06, 0.53, 0.94, 0.86], 'bottom': [0.0, 0.865, 1.0, 1.0], 'top': [0.0, 0.0, 1.0, 0.13]}
-D, RIDGE, SLACK = 96, 0.1, 0.03
+D, RIDGE, SLACK = int(os.environ.get('DIMS', '96')), 0.1, 0.03
 nz = lambda X: X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-9)
 
 # Memory-lean load: one preallocated float32 matrix, each zone block L2-normalised in place.
@@ -60,7 +60,35 @@ P = P.astype(np.float32); S1 = np.zeros(P.shape[1]); S2 = np.zeros((P.shape[1], 
 for idx in np.array_split(ridx, max(1, len(ridx) // 4096)):
     Rb = ((A[idx] - mu) @ P).astype(np.float64); S1 += Rb.sum(0); S2 += Rb.T @ Rb
 C = S2 / len(ridx) - np.outer(S1 / len(ridx), S1 / len(ridx))
-ev, EV = np.linalg.eigh(C); top = EV[:, np.argsort(-ev)[:D]]
+PROJ = os.environ.get('PROJ', 'pca')  # 'lda' tried in v0.4.4: no gain (91.0 % vs 91.4 %)
+if PROJ == 'pca':
+    ev, EV = np.linalg.eigh(C); top = EV[:, np.argsort(-ev)[:D]]
+else:
+    # v0.4.4: twin-discriminant projection. In the noise-whitened space (camera crop vs its reference), keep the
+    # directions where printings of the SAME artwork differ most (reference differences within twin groups,
+    # incl. Japanese vs Latin twins) — the generic PCA kept the illustration's variance, which twins share.
+    # A share of general-variance (PCA) directions is kept so non-twin structure is not lost.
+    fam_refs = collections.defaultdict(list)
+    for i in ridx: fam_refs[fam[i]].append(i)
+    pa, pb = [], []
+    for f, others in tg.items():
+        if f not in fam_refs: continue
+        for g in others:
+            if g in fam_refs and g > f:
+                for a in fam_refs[f][:2]:
+                    for b in fam_refs[g][:2]: pa.append(a); pb.append(b)
+    nb = len(pa); Sb = np.zeros_like(C)
+    for k in range(0, nb, 2048):
+        Db = ((A[pa[k:k + 2048]] - A[pb[k:k + 2048]]) @ P).astype(np.float64); Sb += Db.T @ Db
+    Sb /= max(1, nb)
+    KEEP_PCA = int(os.environ.get('KEEP_PCA', '16'))
+    eb, EB = np.linalg.eigh(Sb); lda = EB[:, np.argsort(-eb)[:D - KEEP_PCA]]
+    if KEEP_PCA:
+        # PCA directions orthogonal to the twin ones.
+        Q = np.eye(C.shape[0]) - lda @ lda.T; Cp = Q @ C @ Q
+        ev, EV = np.linalg.eigh(Cp); top = np.concatenate([lda, EV[:, np.argsort(-ev)[:KEEP_PCA]]], axis=1)
+    else: top = lda
+    print('twin pairs for the projection', nb)
 M = (P @ top).astype(np.float32)
 Z = np.concatenate([nz((A[a:a + 4096] - mu) @ M) for a in range(0, len(A), 4096)]).astype(np.float32)
 Zq = np.clip(np.round(Z * 127), -127, 127) / 127  # what the app compares (int8 index)

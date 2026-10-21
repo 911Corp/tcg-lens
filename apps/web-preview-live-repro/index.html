@@ -35,7 +35,7 @@
     <video id="camera" autoplay playsinline muted disablepictureinpicture disableremoteplayback x-webkit-airplay="deny"></video>
     <div class="camera-vignette" aria-hidden="true"></div>
     <header class="camera-top">
-      <button class="icon-btn mode-btn" id="multiToggle" type="button" aria-pressed="false" aria-label="Scanner plusieurs cartes à la fois"><svg><use href="#i-multi"/></svg></button>
+      <button class="icon-btn mode-btn" id="multiToggle" type="button" aria-pressed="false" aria-label="Scanner plusieurs cartes à la fois" hidden disabled aria-hidden="true" tabindex="-1" style="display:inline-flex;visibility:hidden"><svg><use href="#i-multi"/></svg></button>
       <div class="status-light" id="lensHud"></div>
       <button class="icon-btn" data-go="legend" aria-label="Comment lire le scanner"><svg><use href="#i-info"/></svg></button>
       <span id="livePill" hidden></span>
@@ -115,7 +115,7 @@
         <li data-tone="locked"><b>Voyant vert et contour holographique</b><p>Carte identifiée : nom, extension, numéro, langue et prix s’affichent. Touchez la fiche pour le détail.</p></li>
         <li data-tone="work"><b>Langue détectée seule</b><p>Français, anglais et japonais sont comparés en même temps ; le texte imprimé (PV ou HP, nom, écriture japonaise) confirme la langue avant de valider.</p></li>
         <li data-tone="locked"><b>＋ sur le résultat</b><p>Ajoute la carte à votre collection sans quitter le scanner (touchez plusieurs fois pour plusieurs exemplaires). ✕ ou un glissement vers le bas masque le résultat ; il disparaît aussi quand la carte quitte l’image.</p></li>
-        <li data-tone="attention"><b>Plusieurs cartes à la fois</b><p>Le bouton en haut à gauche scanne jusqu’à 6 cartes posées côte à côte. Une carte n’est nommée que si elle est reconnue sans aucun doute ; sinon elle affiche « ? » : scannez-la seule, la lecture du texte tranchera. « Tout ajouter » met les cartes nommées dans la collection.</p></li>
+        <!-- v0.4.4: mode plusieurs cartes retiré pour le moment -->
         <li data-tone="work"><b>Touchez le voyant</b><p>Il explique ce qu’il se passe. Un appui long affiche le diagnostic technique.</p></li>
       </ol>
       <p class="meta-line">Le Heat (bêta) n’utilise aujourd’hui que l’évolution des prix ; les ventes et le stock ne sont pas encore disponibles.</p>
