@@ -21,7 +21,7 @@ test('printed cues and language-specific names identify the card language', () =
 
 test('Japanese is detected from the parallel Japanese read, even when the visual match is Latin-only', () => {
   const latinOnly = { languages: ['en'], byLang: { en: { name: 'Tropius' } } };
-  const jaScript = { latinConf: 31, jaConf: 20, latinStrong: 0, jaStrong: 3, jaText: 'トロピウスたねワザを使うとき' };
+  const jaScript = { latinConf: 31, jaConf: 20, latinStrong: 0, jaStrong: 3, jaText: 'トロピウスたねワザを使うとき', jaWords: [['トロピウス', 88], ['たね', 85], ['ワザを使うとき', 80]] };
   assert.equal(detectCardLanguage('~ ES TR 110 ~', latinOnly, jaScript).lang, 'ja');
   const latinScript = { latinConf: 40, jaConf: 38, latinStrong: 18, jaStrong: 2, jaText: 'にデーへ三ニニTropiuswm11Oる今ペーンラ、和きみ時へさくい' };
   assert.equal(detectCardLanguage('Basic Tropius HP 110', latinOnly, latinScript).lang, 'en', 'Latin card: Japanese reader noise is ignored');
@@ -59,6 +59,22 @@ test('language consensus needs two agreeing reads and no disagreement', () => {
   lc.observe('x', 'en');
   assert.equal(lc.resolved('x', ['fr', 'en']), null, 'any disagreeing read keeps it unresolved');
   assert.equal(lc.resolved('y', ['fr', 'en']), null);
+  lc.observe('x', 'fr');
+  assert.equal(lc.resolved('x', ['fr', 'en']), 'fr', '3 FR vs 1 EN: one stray misread no longer blocks');
+  lc.observe('x', 'en');
+  assert.equal(lc.resolved('x', ['fr', 'en']), null, '3 FR vs 2 EN: disagreement blocks again');
+});
+
+test('v0.4.3: French rules text is read as French, English as English, Japanese noise as neither', () => {
+  const fr = "Pikachu 60 adversaire. (N'appliquez ni la Faiblesse ni la Résistance aux Pokémon de Banc.) Faiblesse x2 Résistance Retraite Ce Pokémon a de petites poches pleines d'électricité sur les joues. 038/128";
+  const r = detectCardLanguage(fr, { languages: ['fr', 'en'] }, { latinStrong: 4, jaStrong: 0, jaText: '' });
+  assert.equal(r.lang, 'fr'); assert.equal(r.strong, true, 'one clear French read counts as two');
+  const en = "Pikachu 60 HP This attack does 20 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)";
+  const e = detectCardLanguage(en, { languages: ['fr', 'en'] }, { latinStrong: 9, jaStrong: 0, jaText: '' });
+  assert.equal(e.lang, 'en'); assert.equal(e.strong, true);
+  assert.equal(detectCardLanguage('Pokémon Pokémon HP 60', { languages: ['fr', 'en'] }).lang, null, 'Pokémon is printed in both languages');
+  assert.equal(detectCardLanguage('ee les a — re ox Co de', {}, { latinStrong: 0, jaStrong: 0, jaText: '' }).lang, null, 'unreadable: short words are not counted');
+  assert.equal(detectCardLanguage('HP 60 ~~ = = ae', {}, { latinStrong: 0, jaStrong: 0, jaText: '' }).lang, null, 'Japanese cards print HP');
 });
 
 test('fusion never locks a multi-language family before its language is proven', () => {
@@ -154,4 +170,25 @@ import { lockedSheetModel } from '../lens/MarketOverlay.js';
 test('an unverified language is shown as such, never guessed', () => {
   const m = lockedSheetModel({ id: 'me05-001', name: 'Tropius', localId: '001', printedTotal: 84, lang: null, languageUnverified: true, languageCandidates: ['fr', 'en'] }, null, 0.95);
   assert.equal(m.language, 'FR/EN ?');
+});
+
+test('v0.4.3: kana hallucinated on a holo French card are not Japanese evidence when the Latin name is read', () => {
+  const pika = { languages: ['fr', 'en'], byLang: { fr: { name: 'Pikachu' }, en: { name: 'Pikachu' } } };
+  const holo = { latinConf: 36, jaConf: 28, latinStrong: 0, jaStrong: 9, jaText: 'ーーPikachu6るO記ーーっ人をそろでとこ近テラ全信三さ居テ電昌レコ放た' };
+  assert.equal(detectCardLanguage('pEEE Pikachu ~O0 4 = $B yo ag 128 (N16 30)', pika, holo).lang, null);
+  assert.equal(detectCardLanguage('~ ES TR 60 ~', pika, holo).lang, null, 'Latin-only family: noisy kana are below the calibrated bar');
+  const jaFamily = { languages: ['ja'], byLang: { ja: { name: 'ピカチュウ' } } };
+  assert.equal(detectCardLanguage('~ ES TR 60 ~', jaFamily, holo).lang, 'ja', 'a Japanese family is confirmed with the permissive rule');
+});
+
+test('v0.4.3: the Latin name read twice proves a Latin-script card even when FR vs EN is unknown', () => {
+  const pika = { languages: ['fr', 'en'], byLang: { fr: { name: 'Pikachu' }, en: { name: 'Pikachu' } } };
+  const r = detectCardLanguage('pEEE Pikachu ~O0 4 = $B 128', pika, { latinStrong: 2, jaStrong: 0, jaText: '' });
+  assert.equal(r.lang, null); assert.equal(r.script, 'latin');
+  const lc = new LanguageConsensus();
+  lc.observe('card', r.lang, null, r.strong, r.script);
+  assert.equal(lc.scriptResolved('card'), null, 'one read is not enough');
+  lc.observe('card', r.lang, null, r.strong, r.script);
+  assert.equal(lc.scriptResolved('card'), 'latin');
+  assert.equal(detectCardLanguage('~ ES TR 60 ~', pika, { latinStrong: 0, jaStrong: 0, jaText: '' }).script, null);
 });

@@ -54,3 +54,15 @@ test('scan memory: on-device, close descriptors only, proposals only', () => {
   const st = t.stable([{ id: 'S10b-011', languages: ['ja'] }, { id: 'x', languages: ['en'] }]);
   assert.equal(st[0].id, 'S10b-011'); assert.equal(st[0].remembered, true);
 });
+
+test('v0.4.3: a card proven Latin-script is never proposed as its Japanese twin', () => {
+  const t = new ProposalTracker();
+  const cands = [
+    { id: '30th-038', name: 'Pikachu', localId: '038', printedTotal: 128, languages: ['fr', 'en'], lang: 'fr' },
+    { id: 'm6a-032', name: 'Pikachu', localId: '032', printedTotal: 103, languages: ['ja'], lang: 'ja' },
+  ];
+  for (let i = 0; i < 4; i++) t.observe(ranked(0.93, 0.925, 0.70, 0.69, 0.68, 0.67).map((h, k) => ({ ...h, id: cands[k]?.id || h.id })), cal);
+  assert.deepEqual(t.stable(cands).map(x => x.id), ['30th-038', 'm6a-032'], 'two choices while the script is unknown');
+  assert.deepEqual(t.stable(cands, { script: 'latin' }).map(x => x.id), ['30th-038']);
+  assert.ok(!t.stable(cands, { script: 'ja' }).some(x => x.id === '30th-038'), 'and a Japanese card never as its Latin printing');
+});

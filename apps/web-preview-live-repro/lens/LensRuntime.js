@@ -324,7 +324,10 @@ export class LensRuntime {
     // Calibrated mode: OCR is not on the critical path. It starts once the visual decision needs it
     // (artwork twins, ambiguity) or after the lock to read the language, keeping the CPU for vision.
     const ocrNeeded = !this.policy.calibratedInstant || languagePending
-      || ['artwork_twins', 'language_unresolved', 'visual_candidate_needs_corroboration', 'visual_only_lock_not_permitted_for_candidate_set', 'top1_top2_margin_too_small'].includes(this.context.lastDecision?.reason);
+      || ['artwork_twins', 'language_unresolved', 'visual_candidate_needs_corroboration', 'visual_only_lock_not_permitted_for_candidate_set', 'top1_top2_margin_too_small'].includes(this.context.lastDecision?.reason)
+      // v0.4.3: not identified after 1.2 s (whatever the reason, e.g. temporal_visual_mismatch): read the printed
+      // text — it proves the language, removes contradicted proposals and promotes the one whose number matches.
+      || (!locked && performance.now() - (this.context.startedAt || 0) > 1200);
     if (ocrNeeded && (!locked || languagePending) && this.context.visualCandidates.length && at - this.context.lastOcrAt >= this.policy.ocrIntervalMs && quality.score >= this.policy.minQualityForOcr) this._launchOcr(track, (await this.ocrRectifier.rectifyAsync(this.video, track.quad, this.frames)) || accepted?.canvas || this.bestFrame.best?.canvas || rectified);
     this._maybeBarcode(at);
     this._hud();
@@ -452,15 +455,25 @@ export class LensRuntime {
         .sort((a, b) => (top.twinScores?.[b] ?? (b === top.id ? top.score : 0)) - (top.twinScores?.[a] ?? (a === top.id ? top.score : 0)))[0];
       if (alt) chosenId = alt;
     }
+    // v0.4.3: printed-text script proof (Latin text or the Latin name read twice): rules out the other script's
+    // twins — e.g. the Japanese printing of a French card — and may pick the right-script twin.
+    const ocrScript = !lang && !visualScript ? c.langConsensus.scriptResolved(CARD) : null;
+    const script = visualScript || ocrScript;
     if (visualScript && scriptOf(langsOf(chosenId)) !== visualScript) chosenId = top.id;
+    else if (ocrScript && scriptOf(langsOf(chosenId)) !== ocrScript) {
+      const alt = group.filter(id => scriptOf(langsOf(id)) === ocrScript && cands.some(x => x.id === id))
+        .sort((a, b) => (top.twinScores?.[b] ?? (b === top.id ? top.score : 0)) - (top.twinScores?.[a] ?? (a === top.id ? top.score : 0)))[0];
+      if (alt) chosenId = alt;
+    }
     if (regionId && (!lang || langsOf(regionId).includes(lang))) chosenId = regionId;
     const chosen = cands.find(x => x.id === chosenId) || top;
     chosen.calibrated = true;
     chosen.marginNonTwin = top.marginNonTwin;
     chosen.twinGroup = group;
-    chosen.activeTwins = regionId === chosen.id ? [] : group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)) && (!visualScript || scriptOf(langsOf(id)) === visualScript));
+    chosen.activeTwins = regionId === chosen.id ? [] : group.filter(id => id !== chosen.id && (!lang || langsOf(id).includes(lang)) && (!script || scriptOf(langsOf(id)) === script));
     chosen.regionResolved = regionId === chosen.id;
     chosen.visualScript = visualScript;
+    chosen.ocrScript = ocrScript;
     // Printed evidence can only separate twins whose printed number/total differ (Base Set Charizard,
     // Base Set 2, Legendary Collection and the Classic Collections all print "4/102").
     const printedKey = x => (x?.printedNumber ? String(x.printedNumber) : `${String(x?.localId ?? '').replace(/^0+(?=\d)/, '')}/${x?.printedTotal ?? ''}`).toLowerCase();
@@ -486,14 +499,17 @@ export class LensRuntime {
     };
   }
 
-  _observeLanguage(c, evidence, candidateId) {
+  _observeLanguage(c, evidence, candidateId, { cardOnly = false } = {}) {
     const top = c.visualCandidates.find(x => x.id === candidateId);
     if (!top || !evidence?.available) return;
     const languages = top.languages?.length ? top.languages : [top.lang || this.lang];
-    const read = detectCardLanguage(evidence.text, top, evidence.script);
-    const resolved = c.langConsensus.observe(CARD, read.lang, languages, read.strong);
+    // Unstable identity: the read is about the physical card only, so the Japanese bar is the calibrated one.
+    // Latin names of the shortlisted printings: reading one proves a Latin-script card (not its Japanese twin).
+    const latinNames = c.visualCandidates.slice(0, 5).flatMap(x => Object.entries(x.byLang || {}).filter(([l]) => l !== 'ja').map(([, r]) => r?.name)).filter(Boolean);
+    const read = detectCardLanguage(evidence.text, { ...top, latinNames, ...(cardOnly ? { strictScript: true } : {}) }, evidence.script);
+    const resolved = c.langConsensus.observe(CARD, read.lang, languages, read.strong, read.script);
     this.stats.lang = `${read.lang || '?'} → ${resolved || 'non prouvée'}`;
-    this.telemetry.emit('LANGUAGE_READ', { candidateId, read: read.lang, scores: read.scores, resolved });
+    this.telemetry.emit('LANGUAGE_READ', { candidateId, read: read.lang, scores: read.scores, resolved, script: read.script, scriptResolved: c.langConsensus.scriptResolved(CARD) });
     if (c.visualEvidence?.candidateId === top.id) c.visualEvidence = this._visualEvidence(c, top, c.visualEvidence.margin, c.visualEvidence.quality);
   }
 
@@ -501,7 +517,11 @@ export class LensRuntime {
     const c = this.context; if (!c || c.ocrInFlight || c.generation !== track.generation) return;
     if (c.locked && !c.locked.identity?.languageUnverified) return;
     const token = this._identityToken();
-    if (!token.candidateId || token.temporalCandidateId !== token.candidateId) {
+    // v0.4.3: a card still unidentified after 1.2 s (unstable visual top, e.g. holo sleeve) is read anyway, for
+    // the physical card only: its printed language and number filter and rank the proposals.
+    const cardOnly = (!token.candidateId || token.temporalCandidateId !== token.candidateId)
+      && !c.locked && c.visualCandidates.length > 0 && performance.now() - (c.startedAt || 0) > 1200;
+    if (!cardOnly && (!token.candidateId || token.temporalCandidateId !== token.candidateId)) {
       this.telemetry.emit('OCR_SKIPPED_IDENTITY_UNSTABLE', {
         visualCandidateId: token.candidateId,
         temporalCandidateId: token.temporalCandidateId,
@@ -519,6 +539,14 @@ export class LensRuntime {
       // Targeted warming is global (index-level) and identity-neutral, so it runs even if this
       // OCR result turns out to be stale for the current track.
       if (evidence?.lookupItems?.length) this._warmTargeted(evidence.lookupItems);
+      if (cardOnly) {
+        if (this.context !== c || c.generation !== track.generation || c.locked) return;
+        if (evidence.text) { c.ocrTexts.push(evidence.text); if (c.ocrTexts.length > 8) c.ocrTexts.shift(); }
+        const top = c.visualCandidates[0]?.id;
+        if (top) this._observeLanguage(c, evidence, top, { cardOnly: true });
+        this.telemetry.emit('OCR_CARD_ONLY', { top, lang: c.langConsensus.resolved(CARD) });
+        return;
+      }
       if (!this._isIdentityTokenCurrent(token)) {
         this.telemetry.emit('OCR_STALE_DISCARDED', {
           launchedFor: token,
@@ -755,9 +783,9 @@ export class LensRuntime {
     const st = this.stateMachine.state;
     if (st === LENS_STATES.LOCKED || st === LENS_STATES.CHANGE_PENDING) return;
     if (st !== LENS_STATES.AMBIGUOUS && performance.now() - c.startedAt < 1200) return;
-    const evidence = { printed: stablePrintedRead(c.ocrTexts), language: c.langConsensus.resolved(CARD) };
+    const evidence = { printed: stablePrintedRead(c.ocrTexts), language: c.langConsensus.resolved(CARD), script: c.langConsensus.scriptResolved(CARD) };
     const list = c.proposals.stable(c.visualCandidates, evidence);
-    const sig = list.map(x => `${x.id}:${x.numberMatch ? 1 : 0}`).join(',');
+    const sig = `${evidence.language || ''}|` + list.map(x => `${x.id}:${x.numberMatch ? 1 : 0}`).join(',');
     if (sig === c.proposalsShown) return;
     c.proposalsShown = sig;
     if (!list.length) { this.marketOverlay.clear(); return; }

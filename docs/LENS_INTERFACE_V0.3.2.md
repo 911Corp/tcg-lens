@@ -332,3 +332,20 @@ haut (nom, PV/HP) — descripteurs MobileNet, blanchiment appris (recadrage cam�
   maintenant identifié sans lecture du texte ; les reproductions quasi exactes (Dracaufeu Set de Base / Collection
   Classique) restent en propositions.
 - Fichiers `region-*` versionnés par l’empreinte d’index et en cache hors ligne.
+
+## v0.4.3 — langue et écriture de la carte, caméra
+
+Signalement : Pikachu 30 ans FR (038/128, holo, sous pochette) jamais identifié, deux propositions récurrentes
+(038/128 FR/EN et sa jumelle japonaise M6a 032/103).
+
+- **Caméra** (`camera-open.js`) : flux arrière dans l'orientation de l'écran (l'iPhone livrait 1920 × 1280 paysage en
+  portrait : bas de carte coupé, mauvais quadrilatère).
+- **OCR** : lancé après 1,2 s sans identification, même si le haut du classement visuel est instable (lecture
+  « carte seule » : langue, écriture, numéro imprimé → propositions).
+- **Langue** (`LanguageEvidence.js`, calibration `tools/deep/lang-cues.md`) : vocabulaire FR/EN élargi, accents,
+  élisions ; une lecture nette compte double (FR prouvé dès la première lecture sur la carte de test).
+- **Japonais** : contre une famille FR/EN, P(japonais) ≥ 0,98 exigée (la règle permissive se déclenchait sur 10 % des
+  lectures de cartes latines, 21 % en holo — c'était la cause des deux choix).
+- **Écriture latine prouvée** (langue latine lue, ou nom FR/EN lu deux fois) : la jumelle japonaise est retirée des
+  jumelles et des propositions.
+- **Consensus** : 2 lectures et ≥ 3× les autres langues (une lecture parasite ne bloque plus).

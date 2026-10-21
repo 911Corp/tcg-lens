@@ -67,7 +67,7 @@ export class ProposalTracker {
   /**
    * Stable proposals: [{ id, p, frames, numberMatch }] sorted (number match first, then probability).
    * @param candidates the latest candidate objects (to read printed metadata and languages)
-   * @param evidence { printed: parsed collector text seen twice | null, language: proven language | null }
+   * @param evidence { printed: parsed collector text seen twice | null, language: proven language | null, script: 'latin' | 'ja' | null }
    */
   stable(candidates, evidence = {}) {
     if (this.frames.length < this.minFrames) return [];
@@ -80,6 +80,9 @@ export class ProposalTracker {
       const c = byId.get(a.id); if (!c) continue;
       const langs = c.languages?.length ? c.languages : [c.lang];
       if (evidence.language && !langs.includes(evidence.language)) continue;
+      // v0.4.3: a card proven to be printed in Latin script is never proposed as its Japanese printing (and vice versa).
+      if (evidence.script === 'latin' && langs.every(l => l === 'ja')) continue;
+      if (evidence.script === 'ja' && !langs.includes('ja')) continue;
       let numberMatch = false;
       if (evidence.printed) {
         const row = (evidence.language && c.byLang?.[evidence.language]) || c;
